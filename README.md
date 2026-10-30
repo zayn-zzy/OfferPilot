@@ -22,9 +22,9 @@ docker compose up --build
 - API 文档：<http://localhost:8000/docs>
 - 健康检查：<http://localhost:8000/health>
 
-Compose 会启动 PostgreSQL 17、Redis 7、API 和 Web；PostgreSQL 数据及简历原文件分别保存在命名卷中，首次启动会运行 Alembic 迁移。账户密码使用 Argon2id 哈希；登录状态通过 HttpOnly Cookie 维护。开发环境未设置密钥时使用临时随机密钥，重启后现有会话会失效；部署环境必须设置 `OFFERPILOT_SECRET_KEY`。
+Compose 会启动 PostgreSQL 17、Redis 7、API 和 Web；PostgreSQL 数据及简历原文件分别保存在命名卷中，首次启动会运行 Alembic 迁移。浏览器通过 Web 同源的 `/api` 路径访问后端，再由 Next.js 服务转发到 API 容器，因此不依赖浏览器能否直接访问后端端口。账户密码使用 Argon2id 哈希；登录状态通过 HttpOnly Cookie 维护。开发环境未设置密钥时使用临时随机密钥，重启后现有会话会失效；部署环境必须设置 `OFFERPILOT_SECRET_KEY`。
 
-没有 Docker 时，也可以直接启动 API 和 Web。API 默认使用 `backend/offerpilot.db` SQLite 数据库，并将上传文件写入 `backend/storage/`；无需安装 PostgreSQL 或 Redis。若要改用本机 PostgreSQL，可设置 `OFFERPILOT_DATABASE_URL` 后再运行迁移。当前账户、档案和简历功能不依赖 Redis。
+没有 Docker 时，也可以直接启动 API 和 Web。API 默认使用 `backend/offerpilot.db` SQLite 数据库，并将上传文件写入 `backend/storage/`；无需安装 PostgreSQL 或 Redis。Next.js 默认将 `/api` 转发到 `http://127.0.0.1:8000`；若 API 位于其他地址，启动 Web 前设置服务端环境变量 `OFFERPILOT_API_URL`。若要改用本机 PostgreSQL，可设置 `OFFERPILOT_DATABASE_URL` 后再运行迁移。当前账户、档案和简历功能不依赖 Redis。
 
 ```bash
 cd backend

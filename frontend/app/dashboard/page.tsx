@@ -2,16 +2,20 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { apiRequest, type User } from "@/lib/api";
+import { ApiError, apiRequest, type User } from "@/lib/api";
 
 export default function DashboardPage() {
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState("");
+  const [requiresLogin, setRequiresLogin] = useState(false);
 
   useEffect(() => {
     apiRequest<User>("/api/v1/auth/me")
       .then(setUser)
-      .catch(() => setError("登录状态已失效，请重新登录。"));
+      .catch((cause) => {
+        setError(cause instanceof Error ? cause.message : "无法载入工作区。");
+        setRequiresLogin(cause instanceof ApiError && cause.status === 401);
+      });
   }, []);
 
   async function logout() {
@@ -32,7 +36,7 @@ export default function DashboardPage() {
       </header>
       <section className="dashboard-welcome">
         <p className="eyebrow">求职工作台</p>
-        <h1>{user ? `你好，${user.email}` : error ? "请重新登录" : "正在载入你的工作区…"}</h1>
+        <h1>{user ? `你好，${user.email}` : error ? requiresLogin ? "请重新登录" : "暂时无法载入工作区" : "正在载入你的工作区…"}</h1>
         <p>{error || "账户已经准备好。下一步将逐步加入个人档案、岗位管理和投递看板。"}</p>
       </section>
       <section className="setup-panel">

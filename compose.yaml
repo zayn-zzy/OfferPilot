@@ -44,7 +44,7 @@ services:
     image: oven/bun:1
     working_dir: /app
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      OFFERPILOT_API_URL: ${OFFERPILOT_API_URL:-http://api:8000}
     volumes:
       - ./frontend:/app
       - frontend_node_modules:/app/node_modules

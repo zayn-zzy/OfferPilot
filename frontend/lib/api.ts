@@ -4,24 +4,34 @@ export type User = {
   created_at: string;
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number | null) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 
 export async function apiRequest<T = void>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
-  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
-  if (!isFormData && !headers.has("Content-Type")) {
+  if (typeof options.body === "string" && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    credentials: "include",
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...options,
+      credentials: "include",
+      headers,
+    });
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === "AbortError") throw cause;
+    throw new ApiError("无法连接后端服务，请确认服务已启动后重试。", null);
+  }
 
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { detail?: string } | null;
-    throw new Error(body?.detail ?? "服务暂时不可用，请稍后重试。");
+    throw new ApiError(body?.detail ?? "服务暂时不可用，请稍后重试。", response.status);
   }
 
   if (response.status === 204) return undefined as T;

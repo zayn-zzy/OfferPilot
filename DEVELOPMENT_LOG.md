@@ -54,3 +54,17 @@ FastAPI、Pydantic、SQLAlchemy、Alembic、SQLite/PostgreSQL JSON 字段、pypd
 - `bun run typecheck`：通过。
 - `bun run build`：通过，静态生成首页、登录、注册、工作台和个人档案页面。
 - PostgreSQL/Redis Compose 实际启动未验证（本机没有 Docker）。
+
+## 第 2 模块联调修复：API 同源代理
+
+### 问题与修复
+
+- 浏览器原先直接请求 `http://localhost:8000`。在端口转发、容器或远程开发环境里，这个地址可能指向浏览器所在机器，导致 `Failed to fetch`，表单也无法保存。
+- 前端现改为请求同源 `/api/...`，Next.js 服务端再按 `OFFERPILOT_API_URL` 转发到后端；Compose 默认使用容器网络地址 `http://api:8000`，本地直跑默认使用 `http://127.0.0.1:8000`。
+- API 错误现在保留 HTTP 状态码；档案页只在后端明确返回 401 时显示登录入口，网络连接失败会给出服务连接提示。GET 请求也不再额外添加 JSON Content-Type，避免无谓预检。
+
+### 验证
+
+- 同源 `/api/v1/profile` 代理返回后端的 401 JSON（未登录时），证明请求已到达 API，而不是浏览器网络层失败。
+- 使用临时 SQLite 数据库和独立 Web/API 实例，经 Next.js 代理走通注册与 Cookie、档案保存/读取、文本与 DOCX 简历导入、确认、列表、删除和退出流程。
+- 后端 `uv run pytest -q`：13 项通过；前端 `bun run typecheck` 和临时副本中的 `bun run build` 均通过。

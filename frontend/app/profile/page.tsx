@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { type ChangeEvent, type FormEvent, useCallback, useEffect, useState } from "react";
-import { apiRequest } from "@/lib/api";
+import { ApiError, apiRequest } from "@/lib/api";
 
 type Profile = {
   graduation_year: number | null;
@@ -72,6 +72,7 @@ export default function ProfilePage() {
   const [preview, setPreview] = useState<ResumeDetail | null>(null);
   const [pasteText, setPasteText] = useState("");
   const [error, setError] = useState("");
+  const [requiresLogin, setRequiresLogin] = useState(false);
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
@@ -87,7 +88,10 @@ export default function ProfilePage() {
 
   useEffect(() => {
     loadData()
-      .catch((cause) => setError(cause instanceof Error ? cause.message : "无法载入个人档案。"))
+      .catch((cause) => {
+        setError(cause instanceof Error ? cause.message : "无法载入个人档案。");
+        setRequiresLogin(cause instanceof ApiError && cause.status === 401);
+      })
       .finally(() => setLoading(false));
   }, [loadData]);
 
@@ -98,6 +102,7 @@ export default function ProfilePage() {
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    setRequiresLogin(false);
     setNotice("");
     setSavingProfile(true);
     const year = draft.graduationYear.trim();
@@ -119,6 +124,7 @@ export default function ProfilePage() {
       setNotice("个人档案已保存。");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "保存失败，请重试。");
+      setRequiresLogin(cause instanceof ApiError && cause.status === 401);
     } finally {
       setSavingProfile(false);
     }
@@ -131,6 +137,7 @@ export default function ProfilePage() {
     if (!file) return;
 
     setError("");
+    setRequiresLogin(false);
     setNotice("");
     const formData = new FormData();
     formData.append("file", file);
@@ -144,12 +151,14 @@ export default function ProfilePage() {
       setNotice("简历已解析。检查预览后再确认使用。");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "简历上传失败。");
+      setRequiresLogin(cause instanceof ApiError && cause.status === 401);
     }
   }
 
   async function savePastedText(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    setRequiresLogin(false);
     setNotice("");
     try {
       const resume = await apiRequest<ResumeDetail>("/api/v1/resumes/text", {
@@ -162,33 +171,39 @@ export default function ProfilePage() {
       setNotice("简历文本已保存。检查预览后再确认使用。");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "简历文本保存失败。");
+      setRequiresLogin(cause instanceof ApiError && cause.status === 401);
     }
   }
 
   async function showResume(id: string) {
     setError("");
+    setRequiresLogin(false);
     try {
       setPreview(await apiRequest<ResumeDetail>(`/api/v1/resumes/${id}`));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "无法载入简历预览。");
+      setRequiresLogin(cause instanceof ApiError && cause.status === 401);
     }
   }
 
   async function confirmResume() {
     if (!preview) return;
     setError("");
+    setRequiresLogin(false);
     try {
       setPreview(await apiRequest<ResumeDetail>(`/api/v1/resumes/${preview.id}/confirm`, { method: "POST" }));
       await loadData();
       setNotice("这份简历已由你确认，可在后续匹配功能中使用。");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "确认失败，请重试。");
+      setRequiresLogin(cause instanceof ApiError && cause.status === 401);
     }
   }
 
   async function deleteResume() {
     if (!preview || !window.confirm(`删除“${preview.filename}”？`)) return;
     setError("");
+    setRequiresLogin(false);
     try {
       await apiRequest(`/api/v1/resumes/${preview.id}`, { method: "DELETE" });
       setPreview(null);
@@ -196,6 +211,7 @@ export default function ProfilePage() {
       setNotice("简历版本已删除。");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "删除失败，请重试。");
+      setRequiresLogin(cause instanceof ApiError && cause.status === 401);
     }
   }
 
@@ -214,7 +230,7 @@ export default function ProfilePage() {
         <p>信息只属于你的账户。简历解析后会先进入预览，只有你确认的版本才会用于后续匹配。</p>
       </section>
 
-      {error ? <div className="profile-message profile-error" role="alert">{error} <Link href="/login">去登录</Link></div> : null}
+      {error ? <div className="profile-message profile-error" role="alert">{error}{requiresLogin ? <> <Link href="/login">去登录</Link></> : null}</div> : null}
       {notice ? <div className="profile-message profile-success" role="status">{notice}</div> : null}
       {loading ? <p className="profile-loading">正在载入个人档案…</p> : null}
 
