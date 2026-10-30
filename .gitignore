@@ -1,0 +1,35 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Next.js / JavaScript
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+bun-debug.log
+
+# Local databases and uploads
+*.db
+*.sqlite
+*.sqlite3
+backend/storage/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
