@@ -25,7 +25,10 @@ export default function DashboardPage() {
         <Link className="brand" href="/">
           <span className="brand-mark">O</span> OfferPilot
         </Link>
-        <button className="text-button" onClick={logout} type="button">退出登录</button>
+        <div className="dashboard-actions">
+          <Link className="text-link" href="/profile">个人档案</Link>
+          <button className="text-button" onClick={logout} type="button">退出登录</button>
+        </div>
       </header>
       <section className="dashboard-welcome">
         <p className="eyebrow">求职工作台</p>

@@ -28,3 +28,29 @@ Next.js App Router、TypeScript、FastAPI、Pydantic Settings、SQLAlchemy、Ale
 - `bun run typecheck`：通过。
 - `bun run build`：通过，静态生成首页、登录、注册和账户工作区页面。
 - `compose.yaml`：YAML 结构解析通过；Docker Compose 服务启动未执行（本机未安装 Docker）。
+
+## 第 2 次实现：个人档案与简历版本管理
+
+### 完成内容
+
+- 实现当前用户的求职档案读取与保存：毕业年份、学历、专业、目标岗位、城市、行业和技能；输入会去除首尾空白、空项和不区分大小写的重复值。
+- 实现 PDF、DOCX 上传及简历文本粘贴；解析文本进入预览状态，不会自动视为已确认材料。用户可以确认、查看版本列表或删除版本。
+- 增加文件大小、扩展名和文档内容校验；原文件以随机生成的路径保存在用户隔离目录，目录权限为 `0700`、文件权限为 `0600`。接口按当前用户过滤记录，不能读取其他用户的档案或简历。
+- 新增档案与简历数据模型和 Alembic 迁移；Compose 增加持久化的 `resume_storage` 卷。更新工作台入口、档案/简历管理页面、API 客户端的 multipart 上传处理和 README。
+
+### 技术
+
+FastAPI、Pydantic、SQLAlchemy、Alembic、SQLite/PostgreSQL JSON 字段、pypdf、python-docx、Next.js App Router、React、TypeScript、Docker Compose named volume。
+
+### 与上一版本相比
+
+上一版本完成工程骨架和账户认证；本次增加与账户关联的候选人档案和简历版本管理，前端提供导入、预览、确认与删除流程。尚未实现岗位管理、投递看板、RAG、Agent、MCP 或提醒任务，继续按 PRD 后续阶段实现。
+
+### 验证
+
+- 后端 `uv run pytest -vv`：13 项通过，覆盖档案隔离与校验、PDF/DOCX/文本导入、预览确认、删除、文件权限和上传限制。
+- `uv run alembic upgrade head`：全新 SQLite 数据库成功执行两条迁移。
+- `python3 -m compileall -q app migrations tests`：通过。
+- `bun run typecheck`：通过。
+- `bun run build`：通过，静态生成首页、登录、注册、工作台和个人档案页面。
+- PostgreSQL/Redis Compose 实际启动未验证（本机没有 Docker）。

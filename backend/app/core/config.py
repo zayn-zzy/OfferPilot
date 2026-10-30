@@ -1,6 +1,7 @@
 """Environment-backed application settings."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import SecretStr
@@ -23,6 +24,7 @@ class Settings(BaseSettings):
     allowed_origins: list[str] = ["http://localhost:3000"]
     session_cookie_name: str = "offerpilot_session"
     session_ttl_minutes: int = 60
+    storage_dir: Path = Path("storage")
 
 
 @lru_cache

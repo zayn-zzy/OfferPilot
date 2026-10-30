@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import Settings, get_settings
 from app.db import create_session_factory, session_dependency
 from app.routes.auth import router as auth_router
+from app.routes.profile import router as profile_router
+from app.routes.resumes import router as resumes_router
 from app.schemas import HealthRead
 
 logger = logging.getLogger(__name__)
@@ -53,10 +55,12 @@ def create_app(
         CORSMiddleware,
         allow_origins=app_settings.allowed_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type"],
     )
     app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(profile_router, prefix="/api/v1")
+    app.include_router(resumes_router, prefix="/api/v1")
 
     @app.get("/health", response_model=HealthRead, tags=["system"])
     def health(session: Session = Depends(session_dependency(factory))) -> HealthRead:

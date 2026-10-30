@@ -7,13 +7,16 @@ export type User = {
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export async function apiRequest<T = void>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers);
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+  if (!isFormData && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
+    headers,
   });
 
   if (!response.ok) {
