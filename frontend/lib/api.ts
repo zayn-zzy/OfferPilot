@@ -31,7 +31,10 @@ export async function apiRequest<T = void>(path: string, options: RequestInit = 
 
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { detail?: string } | null;
-    throw new ApiError(body?.detail ?? "服务暂时不可用，请稍后重试。", response.status);
+    const message = response.status >= 500
+      ? `后端返回 HTTP ${response.status}，请检查 API 服务日志。`
+      : body?.detail ?? `请求失败（HTTP ${response.status}）。`;
+    throw new ApiError(message, response.status);
   }
 
   if (response.status === 204) return undefined as T;

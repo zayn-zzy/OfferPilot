@@ -55,6 +55,8 @@ uv run pytest
 
 测试使用隔离的 SQLite 内存数据库，不需要启动 PostgreSQL。直接本地启动时默认使用 SQLite；Compose 会通过环境变量连接 Compose 网络内的 PostgreSQL。
 
+更新代码后如果 API 健康检查提示数据库结构过期，需在 `backend/` 目录执行 `uv run alembic upgrade head`，再重启 API。Compose 启动时会自动运行迁移。
+
 ## 前端开发与检查
 
 ```bash

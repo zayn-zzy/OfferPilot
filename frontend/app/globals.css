@@ -40,6 +40,7 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .preview-card { max-width: 600px; margin: 62px auto 0; padding: 24px 26px 12px; text-align: left; border: 1px solid #dfe9e1; border-radius: 18px; background: #ffffffd9; box-shadow: 0 28px 70px #26463812; }
 .preview-header { display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 700; }
 .preview-date { color: #8b9b96; font-size: 12px; font-weight: 500; }
+.preview-demo-badge { padding: 5px 8px; border-radius: 6px; color: #6f7c76; background: #eef2ef; font-size: 10px; font-weight: 600; }
 .preview-stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 24px 0 20px; border-bottom: 1px solid #edf1ed; }
 .preview-stat-row div { display: grid; gap: 3px; }
 .preview-stat-row strong { font-size: 25px; letter-spacing: -0.05em; }

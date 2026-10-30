@@ -68,3 +68,15 @@ FastAPI、Pydantic、SQLAlchemy、Alembic、SQLite/PostgreSQL JSON 字段、pypd
 - 同源 `/api/v1/profile` 代理返回后端的 401 JSON（未登录时），证明请求已到达 API，而不是浏览器网络层失败。
 - 使用临时 SQLite 数据库和独立 Web/API 实例，经 Next.js 代理走通注册与 Cookie、档案保存/读取、文本与 DOCX 简历导入、确认、列表、删除和退出流程。
 - 后端 `uv run pytest -q`：13 项通过；前端 `bun run typecheck` 和临时副本中的 `bun run build` 均通过。
+
+## 第 2 模块故障修复：数据库迁移与页面反馈
+
+- 查明本地 `backend/offerpilot.db` 仍处于迁移 `20261030_0001`，缺少档案和简历表；旧健康检查只执行 `SELECT 1`，因此数据库连通却无法使用新接口。
+- 已对该 SQLite 数据库执行 `20261030_0002`，迁移只新增档案/简历表和索引，保留原账户数据。健康检查现会核对 ORM 所需表，缺表时返回明确的迁移命令，而不再报告健康。
+- 首页求职计划卡片现明确标记为静态演示数据，不属于用户账户；简历文本保存和文件上传增加处理中状态，5xx 错误显示 HTTP 状态码。
+
+### 验证
+
+- 本地数据库 `alembic current`：`20261030_0002 (head)`；API `/health` 返回 200，未登录档案请求返回明确的 401。
+- 后端 `uv run pytest -q`：14 项通过，新增“业务表缺失时健康检查返回迁移提示”的测试。
+- 前端 `bun run typecheck` 与临时副本中的 `bun run build`：通过；通过当前 Web 服务确认首页含“演示数据”及其来源说明。

@@ -76,6 +76,8 @@ export default function ProfilePage() {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [savingResumeText, setSavingResumeText] = useState(false);
+  const [uploadingResume, setUploadingResume] = useState(false);
 
   const loadData = useCallback(async () => {
     const [profile, versions] = await Promise.all([
@@ -139,6 +141,7 @@ export default function ProfilePage() {
     setError("");
     setRequiresLogin(false);
     setNotice("");
+    setUploadingResume(true);
     const formData = new FormData();
     formData.append("file", file);
     try {
@@ -152,6 +155,8 @@ export default function ProfilePage() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "简历上传失败。");
       setRequiresLogin(cause instanceof ApiError && cause.status === 401);
+    } finally {
+      setUploadingResume(false);
     }
   }
 
@@ -160,6 +165,7 @@ export default function ProfilePage() {
     setError("");
     setRequiresLogin(false);
     setNotice("");
+    setSavingResumeText(true);
     try {
       const resume = await apiRequest<ResumeDetail>("/api/v1/resumes/text", {
         method: "POST",
@@ -172,6 +178,8 @@ export default function ProfilePage() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "简历文本保存失败。");
       setRequiresLogin(cause instanceof ApiError && cause.status === 401);
+    } finally {
+      setSavingResumeText(false);
     }
   }
 
@@ -256,14 +264,14 @@ export default function ProfilePage() {
         <div className="profile-panel-heading">
           <div><p className="eyebrow">简历版本</p><h2>导入并检查简历</h2></div>
           <label className="button button-secondary upload-button">
-            上传 PDF / DOCX
-            <input accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={uploadFile} type="file" />
+            {uploadingResume ? "上传并解析中…" : "上传 PDF / DOCX"}
+            <input accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" disabled={uploadingResume} onChange={uploadFile} type="file" />
           </label>
         </div>
         <form className="paste-form" onSubmit={savePastedText}>
           <label htmlFor="resume-text">也可以直接粘贴简历文本</label>
           <textarea id="resume-text" maxLength={100000} onChange={(event) => setPasteText(event.target.value)} placeholder="粘贴简历内容，最多 100,000 字符" rows={5} value={pasteText} />
-          <button className="button button-secondary" disabled={!pasteText.trim()} type="submit">保存为新版本</button>
+          <button className="button button-secondary" disabled={!pasteText.trim() || savingResumeText} type="submit">{savingResumeText ? "保存中…" : "保存为新版本"}</button>
         </form>
 
         <div className="resume-version-list">

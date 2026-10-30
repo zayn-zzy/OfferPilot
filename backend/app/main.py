@@ -7,11 +7,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings, get_settings
 from app.db import create_session_factory, session_dependency
+from app.models import Base
 from app.routes.auth import router as auth_router
 from app.routes.profile import router as profile_router
 from app.routes.resumes import router as resumes_router
@@ -64,10 +65,20 @@ def create_app(
 
     @app.get("/health", response_model=HealthRead, tags=["system"])
     def health(session: Session = Depends(session_dependency(factory))) -> HealthRead:
-        """Check API availability and database connectivity."""
+        """Check database connectivity and presence of the current model schema."""
 
         try:
             session.execute(text("SELECT 1"))
+            existing_tables = set(inspect(session.get_bind()).get_table_names())
+            missing_tables = set(Base.metadata.tables) - existing_tables
+            if missing_tables:
+                logger.error("Database schema is missing tables: %s", ", ".join(sorted(missing_tables)))
+                raise HTTPException(
+                    status_code=503,
+                    detail="Database schema is outdated. Run 'uv run alembic upgrade head'.",
+                )
+        except HTTPException:
+            raise
         except Exception:
             raise HTTPException(status_code=503, detail="Database unavailable") from None
         return HealthRead(status="ok", database="ok")

@@ -28,7 +28,7 @@ export default function HomePage() {
         <div className="preview-card" aria-label="工作台预览">
           <div className="preview-header">
             <span>本周求职计划</span>
-            <span className="preview-date">秋招 · 2026</span>
+            <span className="preview-demo-badge">演示数据</span>
           </div>
           <div className="preview-stat-row">
             <div><strong>03</strong><span>待跟进</span></div>
@@ -46,7 +46,7 @@ export default function HomePage() {
             <span className="task-tag task-tag-muted">计划中</span>
           </div>
         </div>
-        <p className="trust-note">申请内容由你检查并提交 · 简历信息仅用于你的求职工作区</p>
+        <p className="trust-note">计划卡片是写在页面中的静态示例，不来自你的账户或数据库。申请内容由你检查并提交。</p>
       </section>
     </main>
   );

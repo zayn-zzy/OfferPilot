@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.config import Settings
 from app.main import create_app
-from app.models import Base
+from app.models import Base, User
 
 
 @pytest.fixture
@@ -57,6 +57,30 @@ async def test_health_endpoint_checks_database(client: AsyncClient) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "database": "ok"}
+
+
+@pytest.mark.anyio
+async def test_health_reports_missing_schema_migration() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    User.__table__.create(engine)
+    factory: sessionmaker[Session] = sessionmaker(bind=engine, expire_on_commit=False)
+    settings = Settings(
+        environment="test",
+        database_url="sqlite://",
+        secret_key="test-secret-key-that-is-long-enough-for-testing",
+    )
+    app = create_app(settings, factory)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as test_client:
+        response = await test_client.get("/health")
+
+    engine.dispose()
+    assert response.status_code == 503
+    assert "alembic upgrade head" in response.json()["detail"]
 
 
 @pytest.mark.anyio
