@@ -115,7 +115,10 @@ export async function apiRequest<T = void>(path: string, options: RequestInit = 
   }
 
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { detail?: unknown } | null;
+    const body = (await response.json().catch(() => null)) as {
+      code?: unknown;
+      detail?: unknown;
+    } | null;
     const detail = body?.detail;
     const detailMessage = typeof detail === "string"
       ? detail
@@ -129,7 +132,10 @@ export async function apiRequest<T = void>(path: string, options: RequestInit = 
         : typeof detail === "object" && detail !== null && "message" in detail
           ? String(detail.message)
           : null;
-    const message = response.status >= 500
+    const hasMigrationHint = response.status === 503
+      && body?.code === "database_schema_outdated"
+      && detailMessage;
+    const message = response.status >= 500 && !hasMigrationHint
       ? `后端返回 HTTP ${response.status}，请检查 API 服务日志。`
       : detailMessage ?? `请求失败（HTTP ${response.status}）。`;
     throw new ApiError(message, response.status);

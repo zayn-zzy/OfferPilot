@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -304,3 +304,43 @@ async def test_resume_for_another_user_cannot_be_attached_to_application(
     )
 
     assert response.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_job_query_with_missing_column_returns_migration_hint(
+    client: AsyncClient,
+    test_app: FastAPI,
+) -> None:
+    """A partially upgraded database gives an actionable error without leaking SQL."""
+
+    await register(client, "missing-column@example.com")
+    with test_app.state.session_factory() as session:
+        session.execute(text("ALTER TABLE job_postings DROP COLUMN source_type"))
+        session.commit()
+
+    response = await client.get("/api/v1/jobs")
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "database_schema_outdated"
+    assert "uv run alembic upgrade head" in response.json()["detail"]
+    assert "SELECT" not in response.text
+
+
+@pytest.mark.anyio
+async def test_other_database_errors_do_not_report_missing_migrations(
+    client: AsyncClient,
+    test_app: FastAPI,
+) -> None:
+    """Unrelated SQL failures keep a generic error and do not leak the statement."""
+
+    @test_app.get("/test/database-failure")
+    def trigger_database_failure() -> dict[str, str]:
+        with test_app.state.session_factory() as session:
+            session.execute(text("SELECT unavailable_database_function()"))
+        return {"status": "ok"}
+
+    response = await client.get("/test/database-failure")
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Database request failed"}
+    assert "unavailable_database_function" not in response.text

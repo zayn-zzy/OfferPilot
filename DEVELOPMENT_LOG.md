@@ -107,3 +107,28 @@ FastAPI、Pydantic、SQLAlchemy、Alembic、SQLite/PostgreSQL JSON 字段、Next
 - `python -m compileall -q app migrations tests`：通过。
 - 前端 `bun run typecheck`：通过；独立临时副本 `bun run build`：通过，静态生成 `/jobs` 页面。
 - PostgreSQL 17 / Redis 7 容器实际联调仍需有 Docker 的环境；SQLite API 测试和迁移已通过。
+
+## 修复：岗位页面 HTTP 500 与现有数据库升级
+
+### 原因
+
+当前本地数据库仍处于 `20261030_0002`，缺少岗位模块新增的四张表；访问岗位接口时 SQL 查询失败，产生 HTTP 500。开发服务器的 `--reload` 只重载代码，不执行 Alembic 迁移。此前岗位测试使用 `Base.metadata.create_all()` 创建完整新库，没有覆盖已有用户数据库升级及当前运行服务的联调。
+
+### 修复内容与技术
+
+- 使用 SQLite 在线备份接口，将当前数据库备份至被 Git 忽略的 `backend/storage/backups/`，再执行 Alembic 升级至 `20261031_0003`。升级前后对原有账号、档案和简历的完整记录做摘要比对，确认保留。
+- 在 FastAPI 中处理 SQLAlchemy 数据库异常，识别 SQLite 缺表/缺字段错误及 PostgreSQL 对应 SQLSTATE；返回带 `database_schema_outdated` 错误码的 HTTP 503 和迁移操作提示，响应不暴露 SQL 或用户数据。
+- 健康检查与业务接口使用一致的数据库升级提示；前端只对约定的迁移错误展示该提示，其他服务端错误继续使用通用提示。
+- 新增真实 Alembic 迁移回归测试：在临时文件数据库上先运行旧迁移、保存账号/档案/已确认简历，复现缺表响应，再升级并验证原数据、岗位 CRUD、关联旧简历及投递历史。
+- 补充缺字段和非迁移类数据库错误的回归测试，并明确 README 中本地开发的数据库升级步骤。
+
+### 与上次实现相比
+
+本次修复已有岗位模块在旧数据库上的运行问题，并补齐从旧版本升级和当前服务联调的验证；未增加新业务模块。
+
+### 验证
+
+- 后端 `.venv/bin/pytest -q`：26 项通过，新增 3 项回归测试。
+- 当前数据库 `alembic check`：无模型与迁移差异；实际 API `/health`：HTTP 200。
+- 前端 `bun run typecheck`：通过；迁移提示、通用服务端错误及输入校验错误的 4 项请求封装检查通过。
+- 通过实际运行的 Next.js `/api` 代理，用临时账号验证岗位页面返回 HTTP 200、登录态岗位查询返回 HTTP 200，以及岗位创建/编辑/核验/筛选/删除、投递阶段和历史记录流程；测试结束后清理该临时账号及全部关联记录。

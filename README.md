@@ -54,9 +54,9 @@ uv run uvicorn app.main:app --reload --port 8000
 uv run pytest
 ```
 
-测试使用隔离的 SQLite 内存数据库，不需要启动 PostgreSQL。直接本地启动时默认使用 SQLite；Compose 会通过环境变量连接 Compose 网络内的 PostgreSQL。
+测试使用隔离的 SQLite 内存数据库及临时文件数据库，不需要启动 PostgreSQL。直接本地启动时默认使用 SQLite；Compose 会通过环境变量连接 Compose 网络内的 PostgreSQL。
 
-更新代码后如果 API 健康检查提示数据库结构过期，需在 `backend/` 目录执行 `uv run alembic upgrade head`，再重启 API。Compose 启动时会自动运行迁移。
+本地开发服务器的 `--reload` 只会重载 Python 代码，不会升级数据库。每次更新包含数据库迁移的代码后，需在 `backend/` 目录执行 `uv run alembic upgrade head`，再刷新页面。若尚未迁移，相关接口会返回明确的数据库升级提示（HTTP 503）。Compose 每次启动 API 时都会先运行迁移。
 
 ## 前端开发与检查
 

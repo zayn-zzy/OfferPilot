@@ -1,11 +1,35 @@
-"""Database engine, session factory, and request-scoped session dependency."""
+"""Database engine, session dependencies, and schema error classification."""
+
+from collections.abc import Generator
+from sqlite3 import OperationalError as SQLiteOperationalError
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
-from collections.abc import Generator
+
+SCHEMA_OUTDATED_CODE = "database_schema_outdated"
+SCHEMA_OUTDATED_DETAIL = (
+    "数据库结构尚未更新，请在 backend 目录执行 uv run alembic upgrade head，"
+    "完成后刷新页面。"
+)
+
+
+def is_missing_schema_error(error: DBAPIError) -> bool:
+    """Recognize missing tables or columns in SQLite and PostgreSQL drivers."""
+
+    original = error.orig
+    sqlstate = getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
+    if sqlstate in {"42P01", "42703"}:
+        return True
+    if isinstance(original, SQLiteOperationalError):
+        message = str(original).lower()
+        return message.startswith(("no such table:", "no such column:")) or (
+            "has no column named" in message
+        )
+    return False
 
 
 def create_session_factory(settings: Settings) -> tuple[Engine, sessionmaker[Session]]:
