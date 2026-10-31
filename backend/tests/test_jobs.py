@@ -1,6 +1,8 @@
 """Job posting and application-board API tests using isolated SQLite storage."""
 
+import csv
 from collections.abc import AsyncGenerator, Generator
+from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -13,6 +15,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.config import Settings
 from app.main import create_app
 from app.models import Base
+from app.services.job_csv import CSV_HEADERS
 
 
 @pytest.fixture
@@ -344,3 +347,149 @@ async def test_other_database_errors_do_not_report_missing_migrations(
     assert response.status_code == 500
     assert response.json() == {"detail": "Database request failed"}
     assert "unavailable_database_function" not in response.text
+
+
+@pytest.mark.anyio
+async def test_csv_template_preview_duplicate_detection_and_bulk_import(
+    client: AsyncClient,
+    test_app: FastAPI,
+) -> None:
+    """A user can preview selected CSV rows and import them without partial writes."""
+
+    anonymous_template = await client.get("/api/v1/jobs/import/template")
+    assert anonymous_template.status_code == 401
+    await register(client, "csv-import@example.com")
+
+    template = await client.get("/api/v1/jobs/import/template")
+    assert template.status_code == 200
+    assert template.headers["content-type"].startswith("text/csv")
+    assert template.content.decode("utf-8-sig").strip().splitlines()[0].split(",") == list(CSV_HEADERS)
+
+    existing = await client.post(
+        "/api/v1/jobs",
+        json=job_payload(
+            company_name="导入公司",
+            company_website_url="https://import.example",
+            industry="云计算",
+            title="已有岗位",
+            source_url="https://jobs.example/existing",
+        ),
+    )
+    assert existing.status_code == 201
+
+    output = StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=CSV_HEADERS)
+    writer.writeheader()
+    writer.writerow(
+        {
+            "公司名称": "导入公司",
+            "职位名称": "CSV 后端工程师",
+            "城市": "上海",
+            "技能要求": "Python，SQL",
+            "岗位描述": "负责平台开发，包含逗号, 以及\n多行文本。",
+            "岗位来源": "https://jobs.example/imported",
+            "来源类型": "link",
+            "标签": "秋招，优先",
+        }
+    )
+    writer.writerow(
+        {
+            "公司名称": "重复岗位",
+            "职位名称": "重复来源工程师",
+            "岗位来源": "https://jobs.example/imported/",
+        }
+    )
+    writer.writerow(
+        {
+            "公司名称": "已有公司",
+            "职位名称": "已存在来源岗位",
+            "岗位来源": "https://jobs.example/existing",
+        }
+    )
+    writer.writerow(
+        {
+            "公司名称": "错误链接公司",
+            "职位名称": "错误链接岗位",
+            "截止日期": "2027/12/01",
+            "岗位来源": "javascript:alert(1)",
+        }
+    )
+    writer.writerow({"城市": "缺少基本信息"})
+
+    preview = await client.post(
+        "/api/v1/jobs/import/preview",
+        files={"file": ("jobs.csv", output.getvalue().encode("utf-8-sig"), "text/csv")},
+    )
+    assert preview.status_code == 200
+    assert preview.json()["ready_count"] == 1
+    assert preview.json()["duplicate_count"] == 2
+    assert preview.json()["invalid_count"] == 2
+    ready_row = preview.json()["rows"][0]
+    assert ready_row["data"]["required_skills"] == ["Python", "SQL"]
+    assert ready_row["data"]["description"] == "负责平台开发，包含逗号, 以及\n多行文本。"
+    assert preview.json()["rows"][1]["duplicate_detail"] == "与 CSV 第 2 行的来源链接重复"
+    assert "https://" in " ".join(preview.json()["rows"][3]["errors"])
+    assert preview.json()["rows"][4]["data"] is None
+
+    imported = await client.post(
+        "/api/v1/jobs/import",
+        json={"jobs": [ready_row["data"]]},
+    )
+    assert imported.status_code == 201
+    assert len(imported.json()) == 1
+    assert imported.json()[0]["company_website_url"] == "https://import.example"
+    assert imported.json()[0]["industry"] == "云计算"
+
+    existing_conflict = await client.post(
+        "/api/v1/jobs/import",
+        json={
+            "jobs": [
+                {
+                    **ready_row["data"],
+                    "source_url": "https://jobs.example/should-rollback",
+                },
+                {
+                    **ready_row["data"],
+                    "source_url": "https://jobs.example/existing",
+                },
+            ]
+        },
+    )
+    batch_conflict = await client.post(
+        "/api/v1/jobs/import",
+        json={"jobs": [ready_row["data"], ready_row["data"]]},
+    )
+    own_jobs = await client.get("/api/v1/jobs")
+    assert existing_conflict.status_code == 409
+    assert batch_conflict.status_code == 409
+    assert len(own_jobs.json()) == 2
+
+    other_client = AsyncClient(
+        transport=ASGITransport(app=test_app), base_url="http://testserver"
+    )
+    await register(other_client, "csv-import-other@example.com")
+    other_jobs = await other_client.get("/api/v1/jobs")
+    await other_client.aclose()
+    assert other_jobs.status_code == 200
+    assert other_jobs.json() == []
+
+
+@pytest.mark.anyio
+async def test_csv_import_accepts_gb18030_and_normalized_english_headers(
+    client: AsyncClient,
+) -> None:
+    """CSV imports accept common Chinese spreadsheet encoding and field names."""
+
+    await register(client, "csv-encoding@example.com")
+    content = (
+        "company_name,title,city,source_url,source_type\n"
+        "中文公司,后端工程师,杭州,https://jobs.example/gbk,link\n"
+    ).encode("gb18030")
+    preview = await client.post(
+        "/api/v1/jobs/import/preview",
+        files={"file": ("jobs.csv", content, "text/csv")},
+    )
+
+    assert preview.status_code == 200
+    assert preview.json()["ready_count"] == 1
+    assert preview.json()["rows"][0]["company_name"] == "中文公司"

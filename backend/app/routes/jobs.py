@@ -6,7 +6,8 @@ from typing import Annotated, Literal
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy import String, case, cast, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -31,8 +32,16 @@ from app.schemas import (
     ApplicationStage,
     ApplicationStatusEventRead,
     ApplicationUpdate,
+    JobBulkImportWrite,
+    JobCsvPreviewRead,
+    JobCsvPreviewRowRead,
     JobPostingRead,
     JobPostingWrite,
+)
+from app.services.job_csv import (
+    JobCsvImportError,
+    build_job_csv_template,
+    parse_job_csv,
 )
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -275,6 +284,166 @@ def list_jobs(
     ).limit(limit).offset(offset)
     rows = session.execute(statement).all()
     return [_to_read(job, company_row, application) for job, company_row, application in rows]
+
+
+@router.get("/import/template")
+def download_job_csv_template(
+    user: Annotated[User, Depends(current_user_dependency)],
+) -> Response:
+    """Download a UTF-8 CSV template for manually collected job postings."""
+
+    del user
+    return Response(
+        content=build_job_csv_template(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="offerpilot_job_template.csv"'},
+    )
+
+
+@router.post("/import/preview", response_model=JobCsvPreviewRead)
+def preview_job_csv(
+    request: Request,
+    file: Annotated[UploadFile, File(...)],
+    user: Annotated[User, Depends(current_user_dependency)],
+    session: Annotated[Session, Depends(session_dependency)],
+    settings: Annotated[Settings, Depends(settings_dependency)],
+) -> JobCsvPreviewRead:
+    """Validate CSV rows and identify duplicate sources before saving anything."""
+
+    enforce_same_origin(request, settings)
+    if not (file.filename or "").lower().endswith(".csv"):
+        raise HTTPException(status_code=415, detail="请选择 CSV 文件")
+    try:
+        parsed_rows = parse_job_csv(file.file.read(5 * 1024 * 1024 + 1))
+    except JobCsvImportError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    existing_sources = set(
+        session.scalars(
+            select(JobPosting.normalized_source_url).where(
+                JobPosting.user_id == user.id,
+                JobPosting.normalized_source_url.is_not(None),
+            )
+        )
+    )
+    seen_sources: dict[str, int] = {}
+    preview_rows: list[JobCsvPreviewRowRead] = []
+    for row in parsed_rows:
+        payload = row.data
+        row_status: Literal["ready", "duplicate", "invalid"] = (
+            "ready" if payload is not None and not row.errors else "invalid"
+        )
+        duplicate_detail = None
+        if payload is not None:
+            normalized_url = _normalize_source_url(payload.source_url)
+            if normalized_url and normalized_url in existing_sources:
+                row_status = "duplicate"
+                duplicate_detail = "该来源链接已存在于你的岗位列表"
+            elif normalized_url and normalized_url in seen_sources:
+                row_status = "duplicate"
+                duplicate_detail = f"与 CSV 第 {seen_sources[normalized_url]} 行的来源链接重复"
+            elif normalized_url:
+                seen_sources[normalized_url] = row.row_number
+        preview_rows.append(
+            JobCsvPreviewRowRead(
+                row_number=row.row_number,
+                status=row_status,
+                company_name=(payload.company_name if payload else row.fields.get("company_name") or None),
+                title=(payload.title if payload else row.fields.get("title") or None),
+                city=(payload.city if payload else row.fields.get("city") or None),
+                deadline=(
+                    payload.deadline.isoformat()
+                    if payload and payload.deadline
+                    else row.fields.get("deadline") or None
+                ),
+                source_url=(payload.source_url if payload else row.fields.get("source_url") or None),
+                data=payload,
+                errors=row.errors,
+                duplicate_detail=duplicate_detail,
+            )
+        )
+
+    return JobCsvPreviewRead(
+        rows=preview_rows,
+        ready_count=sum(row.status == "ready" for row in preview_rows),
+        duplicate_count=sum(row.status == "duplicate" for row in preview_rows),
+        invalid_count=sum(row.status == "invalid" for row in preview_rows),
+    )
+
+
+@router.post(
+    "/import",
+    response_model=list[JobPostingRead],
+    status_code=status.HTTP_201_CREATED,
+)
+def import_jobs(
+    payload: JobBulkImportWrite,
+    request: Request,
+    user: Annotated[User, Depends(current_user_dependency)],
+    session: Annotated[Session, Depends(session_dependency)],
+    settings: Annotated[Settings, Depends(settings_dependency)],
+) -> list[JobPostingRead]:
+    """Save user-selected validated rows atomically after a preview."""
+
+    enforce_same_origin(request, settings)
+    existing_sources = set(
+        session.scalars(
+            select(JobPosting.normalized_source_url).where(
+                JobPosting.user_id == user.id,
+                JobPosting.normalized_source_url.is_not(None),
+            )
+        )
+    )
+    batch_sources: set[str] = set()
+    for index, job_payload in enumerate(payload.jobs, start=1):
+        normalized_url = _normalize_source_url(job_payload.source_url)
+        if normalized_url and normalized_url in existing_sources:
+            raise HTTPException(
+                status_code=409,
+                detail=f"第 {index} 条岗位的来源链接已存在，请检查预览后再导入。",
+            )
+        if normalized_url and normalized_url in batch_sources:
+            raise HTTPException(
+                status_code=409,
+                detail=f"导入内容中第 {index} 条岗位的来源链接重复。",
+            )
+        if normalized_url:
+            batch_sources.add(normalized_url)
+
+    created: list[tuple[JobPosting, Company | None]] = []
+    try:
+        for job_payload in payload.jobs:
+            company_row = _company_for_payload(
+                session,
+                user,
+                job_payload,
+                preserve_existing_details=True,
+            )
+            job = JobPosting(
+                user_id=user.id,
+                company_id=company_row.id if company_row else None,
+                review_status=(
+                    "verified"
+                    if job_payload.company_name and job_payload.title
+                    else "needs_review"
+                ),
+            )
+            _assign_job_fields(job, job_payload)
+            session.add(job)
+            created.append((job, company_row))
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="导入数据与现有岗位或公司信息冲突，请重新预览后再试。",
+        ) from None
+
+    results = []
+    for job, company_row in created:
+        session.refresh(job)
+        results.append(_to_read(job, company_row, None))
+    return results
 
 
 @router.post("", response_model=JobPostingRead, status_code=status.HTTP_201_CREATED)

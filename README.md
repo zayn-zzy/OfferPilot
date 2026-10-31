@@ -44,6 +44,8 @@ bun run dev
 
 简历支持 PDF、DOCX 上传和文本粘贴，单文件最大 10 MB。上传文件保存在私有目录，数据库保存元信息和提取出的文本；解析结果默认待确认，只有用户确认后才能供后续匹配使用。
 
+在岗位管理页可下载 CSV 模板，填写后上传并预览逐行校验结果；可选择校验通过的行批量导入。支持 UTF-8/GB18030 编码，最多 500 条岗位、5 MB；已有或同一文件内重复的来源链接会标记为重复，导入后的岗位可在列表编辑。
+
 ## 后端开发与测试
 
 ```bash
@@ -80,5 +82,6 @@ bun run build
 - `GET /api/v1/resumes/{id}`、`POST /api/v1/resumes/{id}/confirm`、`DELETE /api/v1/resumes/{id}`：预览、确认或删除当前用户的简历版本。
 - `GET/POST /api/v1/jobs`、`GET/PUT/DELETE /api/v1/jobs/{id}`：筛选、录入、更新或删除岗位；岗位来源链接按用户去重。
 - `POST /api/v1/jobs/{id}/verify`：将公司与职位信息标记为已核验。
+- `GET /api/v1/jobs/import/template`、`POST /api/v1/jobs/import/preview`、`POST /api/v1/jobs/import`：下载岗位 CSV 模板、预览校验并原子批量保存选中的岗位。
 - `POST/PUT/DELETE /api/v1/jobs/{id}/application`：加入投递看板、更新申请进度或停止跟踪。
 - `GET /api/v1/jobs/{id}/application/history`：查看用户确认的阶段变更记录。

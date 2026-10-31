@@ -131,6 +131,27 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .jobs-heading h1 { font-size: clamp(30px, 4vw, 42px); }
 .jobs-heading > p:last-child { max-width: 700px; color: var(--muted); font-size: 14px; line-height: 1.8; }
 .job-form-panel { max-width: 1012px; }
+.csv-import-panel { margin-bottom: 22px; }
+.csv-import-panel > .job-form-hint { margin: 0 0 15px; }
+.csv-upload-row { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.csv-upload-row label { display: grid; gap: 7px; color: var(--ink); font-size: 12px; font-weight: 700; }
+.csv-upload-row input[type="file"] { max-width: min(100%, 480px); padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: white; font: inherit; font-size: 12px; }
+.csv-preview { margin-top: 20px; padding-top: 17px; border-top: 1px solid var(--line); }
+.csv-preview-summary, .csv-preview-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.csv-preview-summary { margin-bottom: 12px; color: var(--muted); font-size: 12px; }
+.csv-preview-summary span { padding: 6px 9px; border-radius: 7px; background: #f0f5f1; }
+.csv-preview-table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+.csv-preview-table { width: 100%; min-width: 760px; border-collapse: collapse; background: white; font-size: 11px; }
+.csv-preview-table th, .csv-preview-table td { padding: 10px; border-bottom: 1px solid #edf1ed; text-align: left; vertical-align: top; }
+.csv-preview-table th { position: sticky; top: 0; color: #61756d; background: #f7faf7; white-space: nowrap; }
+.csv-preview-table td:first-child, .csv-preview-table th:first-child { width: 34px; text-align: center; }
+.csv-preview-table a { color: var(--teal); font-weight: 700; }
+.csv-preview-table td:last-child { min-width: 155px; }
+.csv-preview-table small { margin-top: 4px; display: block; color: #8d5d35; line-height: 1.5; }
+.csv-row-ready { color: #28675b; }
+.csv-row-duplicate { color: #916b31; }
+.csv-row-invalid { color: #a34949; }
+.csv-preview-actions { margin-top: 13px; }
 .job-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .job-form label span { color: #8c9a95; font-size: 10px; font-weight: 400; }
 .job-form input, .job-form select, .job-form textarea, .job-filter-form input, .job-filter-form select, .application-fields input, .application-fields textarea, .stage-control select { width: 100%; padding: 10px 12px; border: 1px solid #dce6df; border-radius: 9px; outline: none; color: var(--ink); background: #fcfdfc; font: inherit; font-size: 13px; }

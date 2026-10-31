@@ -309,3 +309,33 @@ class JobPostingRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     application: ApplicationRead | None
+
+
+class JobCsvPreviewRowRead(BaseModel):
+    """One validated CSV row before it becomes a saved job."""
+
+    row_number: int
+    status: Literal["ready", "duplicate", "invalid"]
+    company_name: str | None
+    title: str | None
+    city: str | None
+    deadline: str | None
+    source_url: str | None
+    data: JobPostingWrite | None
+    errors: list[str] = Field(default_factory=list)
+    duplicate_detail: str | None = None
+
+
+class JobCsvPreviewRead(BaseModel):
+    """Validation and duplicate summary for an uploaded job CSV."""
+
+    rows: list[JobCsvPreviewRowRead]
+    ready_count: int
+    duplicate_count: int
+    invalid_count: int
+
+
+class JobBulkImportWrite(BaseModel):
+    """Owner-confirmed CSV jobs to save in one database transaction."""
+
+    jobs: list[JobPostingWrite] = Field(min_length=1, max_length=500)

@@ -7,6 +7,8 @@ import {
   APPLICATION_STAGE_LABELS,
   ApiError,
   apiRequest,
+  type JobCsvPreview,
+  type JobCsvPreviewRow,
   type ApplicationStatusEvent,
   type ApplicationStage,
   type JobPosting,
@@ -279,6 +281,11 @@ function JobCard({ job, onEdit, onDelete, onTrack, onUpdateApplication, onVerify
 export default function JobsPage() {
   const [jobs, setJobs] = useState<JobPosting[]>([]);
   const [resumes, setResumes] = useState<ResumeVersionSummary[]>([]);
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvPreview, setCsvPreview] = useState<JobCsvPreview | null>(null);
+  const [selectedCsvRows, setSelectedCsvRows] = useState<number[]>([]);
+  const [previewingCsv, setPreviewingCsv] = useState(false);
+  const [importingCsv, setImportingCsv] = useState(false);
   const [view, setView] = useState<View>("jobs");
   const [filters, setFilters] = useState<Filters>({ search: "", city: "", status: "", deadline_before: "", tag: "" });
   const [draftFilters, setDraftFilters] = useState(filters);
@@ -311,6 +318,77 @@ export default function JobsPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function previewCsv(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!csvFile) {
+      setError("请先选择岗位 CSV 文件。");
+      return;
+    }
+    setError("");
+    setSuccess("");
+    setPreviewingCsv(true);
+    const formData = new FormData();
+    formData.append("file", csvFile);
+    try {
+      const result = await apiRequest<JobCsvPreview>("/api/v1/jobs/import/preview", {
+        method: "POST",
+        body: formData,
+      });
+      setCsvPreview(result);
+      setSelectedCsvRows(
+        result.rows
+          .filter((row) => row.status === "ready")
+          .map((row) => row.row_number),
+      );
+    } catch (cause) {
+      setError(apiMessage(cause));
+      setRequiresLogin(cause instanceof ApiError && cause.status === 401);
+      setCsvPreview(null);
+    } finally {
+      setPreviewingCsv(false);
+    }
+  }
+
+  async function importSelectedCsvRows() {
+    const jobsToImport = csvPreview?.rows
+      .filter((row) => selectedCsvRows.includes(row.row_number) && row.status === "ready")
+      .flatMap((row) => row.data ? [row.data] : []) ?? [];
+    if (jobsToImport.length === 0) {
+      setError("请选择至少一条校验通过的岗位。");
+      return;
+    }
+    setError("");
+    setSuccess("");
+    setImportingCsv(true);
+    try {
+      const imported = await apiRequest<JobPosting[]>("/api/v1/jobs/import", {
+        method: "POST",
+        body: JSON.stringify({ jobs: jobsToImport }),
+      });
+      setCsvFile(null);
+      setCsvPreview(null);
+      setSelectedCsvRows([]);
+      setSuccess(`已导入 ${imported.length} 条岗位。可以在岗位列表中继续编辑。`);
+      await loadJobs();
+    } catch (cause) {
+      setError(apiMessage(cause));
+    } finally {
+      setImportingCsv(false);
+    }
+  }
+
+  function toggleCsvRow(row: JobCsvPreviewRow, checked: boolean) {
+    setSelectedCsvRows((current) => checked
+      ? [...current, row.row_number]
+      : current.filter((number) => number !== row.row_number));
+  }
+
+  function toggleAllCsvRows(checked: boolean) {
+    setSelectedCsvRows(checked
+      ? csvPreview?.rows.filter((row) => row.status === "ready").map((row) => row.row_number) ?? []
+      : []);
   }
 
   useEffect(() => {
@@ -444,6 +522,110 @@ export default function JobsPage() {
 
       {error && <div className="profile-message profile-error" role="alert">{error}{requiresLogin && <> <Link href="/login">去登录</Link></>}</div>}
       {success && <div className="profile-message profile-success" role="status">{success}</div>}
+
+      <section className="profile-panel job-form-panel csv-import-panel">
+        <div className="profile-panel-heading">
+          <div>
+            <p className="eyebrow">批量导入</p>
+            <h2>从 CSV 添加岗位</h2>
+          </div>
+          <a className="button button-secondary" href="/api/v1/jobs/import/template">
+            下载 CSV 模板
+          </a>
+        </div>
+        <p className="job-form-hint">
+          支持 UTF-8 或 GB18030 编码，最多 500 条、5 MB。先预览校验结果，再选择要保存的岗位；导入后可继续编辑。
+        </p>
+        <form className="csv-upload-row" onSubmit={previewCsv}>
+          <label>
+            选择 CSV 文件
+            <input
+              accept=".csv,text/csv"
+              onChange={(event) => {
+                setCsvFile(event.target.files?.[0] ?? null);
+                setCsvPreview(null);
+                setSelectedCsvRows([]);
+              }}
+              type="file"
+            />
+          </label>
+          <button className="button button-primary" disabled={!csvFile || previewingCsv} type="submit">
+            {previewingCsv ? "正在检查…" : "预览并检查"}
+          </button>
+        </form>
+
+        {csvPreview && (
+          <div className="csv-preview">
+            <div className="csv-preview-summary">
+              <span>可导入 {csvPreview.ready_count} 条</span>
+              <span>重复 {csvPreview.duplicate_count} 条</span>
+              <span>有错误 {csvPreview.invalid_count} 条</span>
+            </div>
+            <div className="csv-preview-table-wrap">
+              <table className="csv-preview-table">
+                <thead>
+                  <tr>
+                    <th>
+                      <input
+                        aria-label="选择全部可导入岗位"
+                        checked={csvPreview.ready_count > 0 && selectedCsvRows.length === csvPreview.ready_count}
+                        onChange={(event) => toggleAllCsvRows(event.target.checked)}
+                        type="checkbox"
+                      />
+                    </th>
+                    <th>行</th><th>公司</th><th>职位</th><th>城市</th><th>截止日期</th><th>来源</th><th>检查结果</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {csvPreview.rows.map((row) => (
+                    <tr key={row.row_number}>
+                      <td>
+                        <input
+                          aria-label={`选择 CSV 第 ${row.row_number} 行`}
+                          checked={selectedCsvRows.includes(row.row_number)}
+                          disabled={row.status !== "ready"}
+                          onChange={(event) => toggleCsvRow(row, event.target.checked)}
+                          type="checkbox"
+                        />
+                      </td>
+                      <td>{row.row_number}</td>
+                      <td>{row.company_name || "—"}</td>
+                      <td>{row.title || "—"}</td>
+                      <td>{row.city || "—"}</td>
+                      <td>{row.deadline || "—"}</td>
+                      <td>
+                        {row.source_url
+                          ? <a href={row.source_url} rel="noreferrer" target="_blank">打开来源</a>
+                          : "—"}
+                      </td>
+                      <td>
+                        <strong className={`csv-row-status csv-row-${row.status}`}>
+                          {row.status === "ready" ? "可导入" : row.status === "duplicate" ? "重复来源" : "需要修正"}
+                        </strong>
+                        {row.duplicate_detail && <small>{row.duplicate_detail}</small>}
+                        {row.errors.map((message) => <small key={message}>{message}</small>)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="csv-preview-actions">
+              <button
+                className="button button-primary"
+                disabled={selectedCsvRows.length === 0 || importingCsv}
+                onClick={() => void importSelectedCsvRows()}
+                type="button"
+              >
+                {importingCsv ? "导入中…" : `导入选中的 ${selectedCsvRows.length} 条`}
+              </button>
+              <button className="button button-secondary" onClick={() => setCsvPreview(null)} type="button">
+                取消预览
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
 
       <section className="profile-panel job-form-panel">
         <div className="profile-panel-heading">

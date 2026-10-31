@@ -79,6 +79,45 @@ export type JobPosting = {
   application: Application | null;
 };
 
+export type JobPostingWrite = {
+  company_name: string | null;
+  company_website_url: string | null;
+  recruitment_url: string | null;
+  industry: string | null;
+  company_notes: string | null;
+  title: string | null;
+  city: string | null;
+  job_type: string | null;
+  batch: string | null;
+  deadline: string | null;
+  education_requirement: string | null;
+  required_skills: string[];
+  description: string | null;
+  source_url: string | null;
+  source_type: "manual" | "paste" | "link";
+  tags: string[];
+};
+
+export type JobCsvPreviewRow = {
+  row_number: number;
+  status: "ready" | "duplicate" | "invalid";
+  company_name: string | null;
+  title: string | null;
+  city: string | null;
+  deadline: string | null;
+  source_url: string | null;
+  data: JobPostingWrite | null;
+  errors: string[];
+  duplicate_detail: string | null;
+};
+
+export type JobCsvPreview = {
+  rows: JobCsvPreviewRow[];
+  ready_count: number;
+  duplicate_count: number;
+  invalid_count: number;
+};
+
 export type ApplicationStatusEvent = {
   id: string;
   from_status: ApplicationStage | null;
