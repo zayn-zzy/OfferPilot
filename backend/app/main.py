@@ -14,6 +14,7 @@ from app.core.config import Settings, get_settings
 from app.db import create_session_factory, session_dependency
 from app.models import Base
 from app.routes.auth import router as auth_router
+from app.routes.jobs import router as jobs_router
 from app.routes.profile import router as profile_router
 from app.routes.resumes import router as resumes_router
 from app.schemas import HealthRead
@@ -60,6 +61,7 @@ def create_app(
         allow_headers=["Content-Type"],
     )
     app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(jobs_router, prefix="/api/v1")
     app.include_router(profile_router, prefix="/api/v1")
     app.include_router(resumes_router, prefix="/api/v1")
 

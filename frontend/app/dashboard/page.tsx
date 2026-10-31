@@ -31,21 +31,22 @@ export default function DashboardPage() {
         </Link>
         <div className="dashboard-actions">
           <Link className="text-link" href="/profile">个人档案</Link>
+          <Link className="text-link" href="/jobs">岗位管理</Link>
           <button className="text-button" onClick={logout} type="button">退出登录</button>
         </div>
       </header>
       <section className="dashboard-welcome">
         <p className="eyebrow">求职工作台</p>
         <h1>{user ? `你好，${user.email}` : error ? requiresLogin ? "请重新登录" : "暂时无法载入工作区" : "正在载入你的工作区…"}</h1>
-        <p>{error || "账户已经准备好。下一步将逐步加入个人档案、岗位管理和投递看板。"}</p>
+        <p>{error || "管理个人档案、记录招聘岗位，并在投递看板里维护申请进度。"}</p>
       </section>
       <section className="setup-panel">
         <div className="setup-icon">01</div>
         <div>
-          <h2>账户与基础服务已就绪</h2>
-          <p>当前阶段完成账户与全栈服务骨架。后续模块会在此基础上增加个人档案和岗位管理。</p>
+          <h2>求职资料与岗位管理已就绪</h2>
+          <p>你的个人资料、简历版本、岗位来源和投递阶段会按账户隔离保存。</p>
         </div>
-        <span className="status-pill">基础模块</span>
+        <Link className="button button-primary" href="/jobs">管理岗位</Link>
       </section>
     </main>
   );

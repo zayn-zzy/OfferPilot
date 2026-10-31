@@ -1,9 +1,18 @@
 """SQLAlchemy domain models for the first product milestone."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, JSON, String, Text, Uuid
+from sqlalchemy import (
+    Date,
+    DateTime,
+    ForeignKey,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -45,7 +54,9 @@ class CandidateProfile(Base):
     industries: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     skills: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
 
 
 class ResumeVersion(Base):
@@ -63,4 +74,116 @@ class ResumeVersion(Base):
     storage_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     extracted_text: Mapped[str] = mapped_column(Text, nullable=False)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class Company(Base):
+    """A company saved by one user, with reusable recruiting details."""
+
+    __tablename__ = "companies"
+    __table_args__ = (
+        UniqueConstraint("user_id", "normalized_name", name="uq_companies_owner_name"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    normalized_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    website_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    recruitment_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    industry: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class JobPosting(Base):
+    """A user-owned job record with its original source and verification state."""
+
+    __tablename__ = "job_postings"
+    __table_args__ = (
+        UniqueConstraint("user_id", "normalized_source_url", name="uq_jobs_owner_source_url"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    company_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("companies.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    job_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    batch: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    deadline: Mapped[date | None] = mapped_column(Date, nullable=True)
+    education_requirement: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    required_skills: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    normalized_source_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    source_type: Mapped[str] = mapped_column(String(16), default="manual", nullable=False)
+    source_captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    review_status: Mapped[str] = mapped_column(String(24), default="needs_review", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class Application(Base):
+    """One user's application tracking record for a saved job."""
+
+    __tablename__ = "applications"
+    __table_args__ = (UniqueConstraint("user_id", "job_id", name="uq_applications_owner_job"),)
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    job_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("job_postings.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(24), default="to_research", nullable=False)
+    applied_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    resume_version_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("resume_versions.id", ondelete="SET NULL"), nullable=True
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_action: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    next_action_due: Mapped[date | None] = mapped_column(Date, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class ApplicationStatusEvent(Base):
+    """Append-only history of status changes made by the user."""
+
+    __tablename__ = "application_status_events"
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    application_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("applications.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    from_status: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    to_status: Mapped[str] = mapped_column(String(24), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

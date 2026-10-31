@@ -1,9 +1,34 @@
 """Validated API input and response schemas."""
 
-from datetime import datetime
+from datetime import date, datetime
+from typing import Literal
+from urllib.parse import urlsplit
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
+
+
+ApplicationStage = Literal[
+    "to_research",
+    "interested",
+    "preparing",
+    "applied",
+    "assessment",
+    "interview",
+    "offer",
+    "accepted",
+    "rejected",
+    "withdrawn",
+    "closed",
+]
 
 
 class UserCreate(BaseModel):
@@ -131,3 +156,156 @@ class ResumeDetail(ResumeSummary):
     """Resume metadata and extracted text shown in the review screen."""
 
     extracted_text: str
+
+
+class JobPostingWrite(BaseModel):
+    """User-entered job and company fields; incomplete records remain reviewable."""
+
+    company_name: str | None = Field(default=None, max_length=200)
+    company_website_url: str | None = Field(default=None, max_length=2048)
+    recruitment_url: str | None = Field(default=None, max_length=2048)
+    industry: str | None = Field(default=None, max_length=120)
+    company_notes: str | None = Field(default=None, max_length=5000)
+    title: str | None = Field(default=None, max_length=200)
+    city: str | None = Field(default=None, max_length=120)
+    job_type: str | None = Field(default=None, max_length=80)
+    batch: str | None = Field(default=None, max_length=120)
+    deadline: date | None = None
+    education_requirement: str | None = Field(default=None, max_length=120)
+    required_skills: list[str] = Field(default_factory=list, max_length=50)
+    description: str | None = Field(default=None, max_length=30_000)
+    source_url: str | None = Field(default=None, max_length=2048)
+    source_type: Literal["manual", "paste", "link"] = "manual"
+    tags: list[str] = Field(default_factory=list, max_length=30)
+
+    @field_validator(
+        "company_name",
+        "company_website_url",
+        "recruitment_url",
+        "industry",
+        "company_notes",
+        "title",
+        "city",
+        "job_type",
+        "batch",
+        "education_requirement",
+        "description",
+        "source_url",
+    )
+    @classmethod
+    def normalize_optional_job_text(cls, value: str | None) -> str | None:
+        """Trim optional text and convert blank values to null."""
+
+        normalized = value.strip() if value else ""
+        return normalized or None
+
+    @field_validator("source_url", "company_website_url", "recruitment_url")
+    @classmethod
+    def validate_http_url(cls, value: str | None) -> str | None:
+        """Accept only absolute HTTP(S) links so stored evidence is clickable."""
+
+        if value is None:
+            return None
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("链接必须以 http:// 或 https:// 开头")
+        return value
+
+    @field_validator("required_skills", "tags")
+    @classmethod
+    def normalize_job_lists(cls, values: list[str]) -> list[str]:
+        """Drop blanks and case-insensitive duplicates from user-maintained lists."""
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            item = value.strip()
+            key = item.casefold()
+            if item and key not in seen:
+                normalized.append(item)
+                seen.add(key)
+        return normalized
+
+    @model_validator(mode="after")
+    def require_some_job_information(self) -> "JobPostingWrite":
+        """Prevent empty rows while allowing partially known postings."""
+
+        if not any((self.company_name, self.title, self.source_url, self.description)):
+            raise ValueError(
+                "请至少填写公司、职位、来源链接或岗位描述中的一项"
+            )
+        return self
+
+
+class ApplicationUpdate(BaseModel):
+    """Editable application-board details; omitted values remain unchanged."""
+
+    status: ApplicationStage | None = None
+    applied_at: date | None = None
+    resume_version_id: UUID | None = None
+    notes: str | None = Field(default=None, max_length=5000)
+    next_action: str | None = Field(default=None, max_length=500)
+    next_action_due: date | None = None
+
+    @field_validator("notes", "next_action")
+    @classmethod
+    def normalize_application_text(cls, value: str | None) -> str | None:
+        """Convert blank notes and actions to null."""
+
+        normalized = value.strip() if value else ""
+        return normalized or None
+
+
+class ApplicationStatusEventRead(BaseModel):
+    """One user-confirmed transition in an application timeline."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    from_status: str | None
+    to_status: ApplicationStage
+    created_at: datetime
+
+
+class ApplicationRead(BaseModel):
+    """Application tracking data attached to a job summary."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    status: ApplicationStage
+    applied_at: date | None
+    resume_version_id: UUID | None
+    notes: str | None
+    next_action: str | None
+    next_action_due: date | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class JobPostingRead(BaseModel):
+    """Job, company, source, and optional board data shown to its owner."""
+
+    id: UUID
+    company_id: UUID | None
+    company_name: str | None
+    company_website_url: str | None
+    recruitment_url: str | None
+    industry: str | None
+    company_notes: str | None
+    title: str | None
+    city: str | None
+    job_type: str | None
+    batch: str | None
+    deadline: date | None
+    education_requirement: str | None
+    required_skills: list[str]
+    description: str | None
+    source_url: str | None
+    source_type: Literal["manual", "paste", "link"]
+    source_captured_at: datetime
+    tags: list[str]
+    review_status: Literal["needs_review", "verified"]
+    created_at: datetime
+    updated_at: datetime
+    application: ApplicationRead | None

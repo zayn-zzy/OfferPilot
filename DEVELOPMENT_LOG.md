@@ -80,3 +80,30 @@ FastAPI、Pydantic、SQLAlchemy、Alembic、SQLite/PostgreSQL JSON 字段、pypd
 - 本地数据库 `alembic current`：`20261030_0002 (head)`；API `/health` 返回 200，未登录档案请求返回明确的 401。
 - 后端 `uv run pytest -q`：14 项通过，新增“业务表缺失时健康检查返回迁移提示”的测试。
 - 前端 `bun run typecheck` 与临时副本中的 `bun run build`：通过；通过当前 Web 服务确认首页含“演示数据”及其来源说明。
+
+## 第 3 次实现：岗位管理与投递看板
+
+### 完成内容
+
+- 实现岗位手动录入、详情、编辑和删除；可保存公司、职位、城市、岗位类型、招聘批次、截止日期、学历要求、技能、备注、标签、招聘主页、来源链接和原始岗位描述。信息不完整的记录允许先保存并标记为待核验。
+- 新增按用户隔离的公司档案；同一用户重复录入公司时复用公司信息。岗位来源链接会标准化并按用户去重，重复时返回可读提示，不会静默合并。
+- 实现结构化岗位筛选：公司/职位/城市/行业关键词、城市、投递阶段、截止日期和标签；筛选不调用 LLM。
+- 实现投递看板及完整阶段：待了解、感兴趣、准备中、已投递、测评中、面试中、Offer、已接受、已拒绝、已撤回、已关闭。可记录申请日期、关联简历版本、联系人/进展备注、下一步和日期。
+- 每次加入看板和阶段变化都追加历史记录；只有当前用户能读取和修改自己的岗位、公司、申请及关联简历版本。
+- 新增首页工作台入口、岗位管理页面、API 错误校验提示、数据库迁移和岗位工作流测试；更新 README 与 OpenAPI。
+
+### 技术
+
+FastAPI、Pydantic、SQLAlchemy、Alembic、SQLite/PostgreSQL JSON 字段、Next.js App Router、React、TypeScript。通过 `companies`、`job_postings`、`applications` 与 `application_status_events` 分开管理公司资料、岗位、投递记录和阶段审计；数据库唯一约束辅助防止同用户重复公司及重复来源链接。
+
+### 与上一版本相比
+
+上一版本完成账户、个人档案和简历管理；本次补齐 PRD 阶段一所需的岗位 CRUD 与投递看板，形成“保存岗位—核验—加入看板—记录进展”的可操作流程。CSV 批量导入、Agent 岗位提取、匹配、RAG、MCP 和提醒仍属于后续阶段，当前没有虚构自动提取或自动投递能力。
+
+### 验证
+
+- 后端 `.venv/bin/pytest -q`：23 项通过，新增 9 项覆盖待核验保存、来源去重、公司资料复用、用户隔离、投递阶段和历史、筛选、简历归属及核验流程。
+- `alembic upgrade head`：在 `/tmp` 中的全新 SQLite 数据库成功执行三条迁移；`alembic check`：无未生成迁移。
+- `python -m compileall -q app migrations tests`：通过。
+- 前端 `bun run typecheck`：通过；独立临时副本 `bun run build`：通过，静态生成 `/jobs` 页面。
+- PostgreSQL 17 / Redis 7 容器实际联调仍需有 Docker 的环境；SQLite API 测试和迁移已通过。
