@@ -19,6 +19,7 @@ import JobEditor from "./job-editor";
 import JobExtractionPanel from "./job-extraction-panel";
 
 type Filters = { search: string; city: string; status: string; deadline_before: string; tag: string };
+const DEFAULT_FILTERS: Filters = { search: "", city: "", status: "", deadline_before: "", tag: "" };
 
 function apiMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : "操作失败，请稍后重试。";
@@ -33,7 +34,7 @@ export default function JobsPage() {
   const [previewingCsv, setPreviewingCsv] = useState(false);
   const [importingCsv, setImportingCsv] = useState(false);
   const [createPanel, setCreatePanel] = useState<"new" | "csv" | "extract" | null>(null);
-  const [filters, setFilters] = useState<Filters>({ search: "", city: "", status: "", deadline_before: "", tag: "" });
+  const [filters, setFilters] = useState<Filters>({ ...DEFAULT_FILTERS });
   const [draftFilters, setDraftFilters] = useState(filters);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -59,6 +60,13 @@ export default function JobsPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function resetFiltersAndReload() {
+    const nextFilters = { ...DEFAULT_FILTERS };
+    setFilters(nextFilters);
+    setDraftFilters(nextFilters);
+    await loadJobs(nextFilters);
   }
 
   async function previewCsv(event: FormEvent<HTMLFormElement>) {
@@ -112,7 +120,7 @@ export default function JobsPage() {
       setCsvPreview(null);
       setSelectedCsvRows([]);
       setSuccess(`已导入 ${imported.length} 条岗位。可以在岗位列表中继续编辑。`);
-      await loadJobs();
+      await resetFiltersAndReload();
     } catch (cause) {
       setError(apiMessage(cause));
     } finally {
@@ -150,7 +158,7 @@ export default function JobsPage() {
     });
     setCreatePanel(null);
     setSuccess("岗位已保存。");
-    await loadJobs();
+    await resetFiltersAndReload();
   }
 
   async function saveJob(job: JobPosting, payload: JobPostingWrite) {
@@ -336,7 +344,7 @@ export default function JobsPage() {
         <JobExtractionPanel onCancel={() => setCreatePanel(null)} onJobCreated={() => {
           setCreatePanel(null);
           setSuccess("岗位已保存，原文和字段依据已关联。可在岗位卡片中查看。");
-          void loadJobs();
+          void resetFiltersAndReload();
         }} />
       </section>}
 
