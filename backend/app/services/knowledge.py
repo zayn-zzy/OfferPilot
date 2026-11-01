@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.models import DocumentChunk
 
-EMBEDDING_DIMENSIONS = 1536
+MAX_EMBEDDING_DIMENSIONS = 16_000
 CHUNK_SIZE = 900
 CHUNK_OVERLAP = 120
 EMBEDDING_BATCH_SIZE = 32
@@ -69,7 +69,7 @@ def _endpoint(base_url: str, endpoint: str) -> str:
 
 
 class OpenAICompatibleEmbeddingProvider:
-    """Call an OpenAI-compatible embeddings endpoint with a fixed vector size."""
+    """Call an OpenAI-compatible embeddings endpoint and retain its native size."""
 
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self._transport = transport
@@ -86,6 +86,7 @@ class OpenAICompatibleEmbeddingProvider:
             return [], settings.embedding_model.strip()
 
         output: list[list[float] | None] = [None] * len(texts)
+        embedding_dimensions: int | None = None
         try:
             async with httpx.AsyncClient(
                 timeout=settings.llm_timeout_seconds, transport=self._transport
@@ -114,11 +115,18 @@ class OpenAICompatibleEmbeddingProvider:
                         vector = row["embedding"]
                         if not isinstance(index, int) or not 0 <= index < len(batch):
                             raise ValueError("invalid embedding index")
-                        if len(vector) != EMBEDDING_DIMENSIONS:
+                        dimensions = len(vector)
+                        if not 1 <= dimensions <= MAX_EMBEDDING_DIMENSIONS:
                             raise KnowledgeServiceError(
                                 "embedding_dimension_mismatch",
-                                f"向量模型必须返回 {EMBEDDING_DIMENSIONS} 维结果。",
+                                f"向量模型返回了不支持的维度：{dimensions}。",
                             )
+                        if embedding_dimensions is not None and dimensions != embedding_dimensions:
+                            raise KnowledgeServiceError(
+                                "embedding_dimension_mismatch",
+                                "向量服务在同一批请求中返回了不同维度，请检查模型配置。",
+                            )
+                        embedding_dimensions = dimensions
                         if any(not isinstance(value, (int, float)) or not math.isfinite(value) for value in vector):
                             raise ValueError("invalid embedding values")
                         output[start + index] = [float(value) for value in vector]
@@ -250,6 +258,8 @@ def retrieve_chunks(
     *,
     user_id: UUID,
     query_vector: list[float],
+    embedding_model: str,
+    embedding_dimensions: int,
     limit: int,
     source_types: tuple[str, ...] = ("resume", "note"),
 ) -> list[tuple[DocumentChunk, float]]:
@@ -258,6 +268,8 @@ def retrieve_chunks(
     statement = select(DocumentChunk).where(
         DocumentChunk.user_id == user_id,
         DocumentChunk.source_type.in_(source_types),
+        DocumentChunk.embedding_model == embedding_model,
+        DocumentChunk.embedding_dimensions == embedding_dimensions,
     )
     if session.get_bind().dialect.name == "postgresql":
         distance = DocumentChunk.embedding.cosine_distance(query_vector).label("distance")

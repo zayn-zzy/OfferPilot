@@ -226,7 +226,10 @@ class DocumentChunk(Base):
     chunk_index: Mapped[int] = mapped_column(nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     embedding: Mapped[list[float]] = mapped_column(
-        VECTOR(1536).with_variant(JSON(), "sqlite"), nullable=False
+        VECTOR().with_variant(JSON(), "sqlite"), nullable=False
+    )
+    embedding_dimensions: Mapped[int] = mapped_column(
+        default=1536, server_default="1536", nullable=False
     )
     embedding_model: Mapped[str] = mapped_column(String(120), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

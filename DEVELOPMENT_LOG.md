@@ -254,3 +254,17 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 - 前端 `bun run typecheck`：通过；本地 Next.js `/knowledge` 页面返回了预期页面内容；本地 API `/health` 返回数据库正常。
 - SQLite Alembic 全迁移链在后端迁移测试中通过。本机 `backend/offerpilot.db` 已从 `20261101_0004` 升至 `20261101_0005`；迁移前备份为 `backend/storage/backups/offerpilot-before-0005-20261101.sqlite3`，权限 `0600`。
 - `git diff --check`：通过。当前环境没有 PostgreSQL/pgvector 实例及 Docker，因此未声称通过真实 PostgreSQL 集成测试；本地实际数据库验证使用 SQLite。
+
+## 修复：兼容 Embeddings 服务返回的向量维度
+
+- 用户触发“建立 / 更新索引”返回 HTTP 503。用不含个人资料的合成诊断文本调用已配置的 Embeddings 服务，确认服务可连通，但返回维度与代码硬编码的 1536 不同；因此不是登录、数据库或 API 连通故障，而是实现错误限制了可用模型。
+- 移除固定的 1536 维校验，索引时记录实际向量维度；PostgreSQL 使用无固定维度的 pgvector 列，查询前检查当前模型/维度与索引一致，配置改变时提示重建索引。SQLite 继续用 JSON 与本地余弦计算。PostgreSQL 改为账户过滤后的精确余弦检索，移除只支持固定维度的 HNSW 索引。
+- 向量服务错误现在以不含密钥/响应正文的错误码写入 API 日志；前端仅对知识模块的安全 Embeddings/Answer 错误展示服务端消息，其他 5xx 仍不泄漏内部异常。
+- 新增 Alembic `20261101_0006`，为现有索引记录维度并把 PostgreSQL 向量列改为可变维度；本地数据库迁移前另存了权限为 `0600` 的备份。
+
+### 验证
+
+- 使用不含个人资料的合成文本直接检查已配置的 Embeddings 服务：请求成功，返回 1 个 1024 维向量；修复前同一返回会因 1536 维硬编码而失败。
+- 后端 `.venv/bin/pytest -q`：49 项通过，新增覆盖 1024 维索引与问答、拒绝同次请求中的混合维度。前端 `bun run typecheck`、Python `compileall` 和 `git diff --check` 均通过。
+- 本机 SQLite 已迁移到 `20261101_0006`；迁移前备份为 `backend/storage/backups/offerpilot-before-0006-20261101.sqlite3`，权限 `0600`。运行中的 API `/health` 返回数据库正常。
+- 当前环境没有 PostgreSQL/pgvector 实例，因此没有声称完成真实 PostgreSQL 集成验证；PostgreSQL 查询和无固定维度列仍有 SQL 编译测试。

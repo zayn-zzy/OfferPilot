@@ -27,8 +27,11 @@ from app.services.knowledge import (
 
 
 class FakeEmbeddingProvider:
+    def __init__(self, dimensions: int = 1536) -> None:
+        self.dimensions = dimensions
+
     async def embed(self, texts: list[str], settings: Settings):
-        vector = [0.0] * 1536
+        vector = [0.0] * self.dimensions
         vector[0] = 1.0
         return [vector.copy() for _ in texts], "test-embedding-model"
 
@@ -121,6 +124,28 @@ async def test_note_reindex_returns_only_valid_source_quotes(client: AsyncClient
     assert body["no_evidence"] is False
     assert body["citations"][0]["source_name"] == "实习项目"
     assert body["citations"][0]["quote"] in note.json()["content"]
+
+
+@pytest.mark.anyio
+async def test_reindex_and_query_support_the_embedding_models_native_dimension(
+    client: AsyncClient, test_app: FastAPI
+) -> None:
+    await register(client, "knowledge-dimensions@example.com")
+    note = await client.post(
+        "/api/v1/knowledge/notes",
+        json={"title": "维度兼容", "content": "该笔记用于验证一千零二十四维向量正常索引。"},
+    )
+    test_app.state.embedding_provider = FakeEmbeddingProvider(dimensions=1024)
+
+    indexed = await client.post("/api/v1/knowledge/reindex")
+    assert indexed.status_code == 200
+    with test_app.state.session_factory() as session:
+        chunk = session.scalar(select(DocumentChunk))
+        assert chunk is not None and chunk.embedding_dimensions == 1024
+
+    answer = await client.post("/api/v1/knowledge/ask", json={"question": "向量维度是什么？"})
+    assert answer.status_code == 200
+    assert answer.json()["citations"][0]["source_id"] == note.json()["id"]
 
 
 @pytest.mark.anyio
@@ -285,20 +310,30 @@ async def test_openai_compatible_embeddings_validate_endpoint_and_vector_size() 
         assert body["input"] == ["fragment"]
         return Response(
             200,
-            json={"data": [{"index": 0, "embedding": [0.25] * 1536}]},
+            json={"data": [{"index": 0, "embedding": [0.25] * 1024}]},
         )
 
     provider = OpenAICompatibleEmbeddingProvider(transport=MockTransport(valid_response))
     vectors, model_name = await provider.embed(["fragment"], settings)
     assert model_name == "test-embedding"
-    assert len(vectors) == 1 and len(vectors[0]) == 1536
+    assert len(vectors) == 1 and len(vectors[0]) == 1024
 
-    async def invalid_response(_request):
-        return Response(200, json={"data": [{"index": 0, "embedding": [0.25, 0.5]}]})
+    async def inconsistent_response(_request):
+        return Response(
+            200,
+            json={
+                "data": [
+                    {"index": 0, "embedding": [0.25] * 1024},
+                    {"index": 1, "embedding": [0.5] * 768},
+                ]
+            },
+        )
 
-    invalid_provider = OpenAICompatibleEmbeddingProvider(transport=MockTransport(invalid_response))
-    with pytest.raises(KnowledgeServiceError, match="1536"):
-        await invalid_provider.embed(["fragment"], settings)
+    inconsistent_provider = OpenAICompatibleEmbeddingProvider(
+        transport=MockTransport(inconsistent_response)
+    )
+    with pytest.raises(KnowledgeServiceError, match="不同维度"):
+        await inconsistent_provider.embed(["fragment", "another fragment"], settings)
 
 
 def test_chunking_bounds_fragments_and_preserves_overlap() -> None:
@@ -317,5 +352,5 @@ def test_postgresql_vector_column_and_cosine_query_compile() -> None:
         .limit(5)
         .compile(dialect=postgresql_dialect())
     )
-    assert "VECTOR(1536)" in create_table
+    assert "VECTOR" in create_table
     assert "<=>" in query

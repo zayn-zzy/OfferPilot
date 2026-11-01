@@ -263,7 +263,12 @@ export async function apiRequest<T = void>(path: string, options: RequestInit = 
     const hasMigrationHint = response.status === 503
       && body?.code === "database_schema_outdated"
       && detailMessage;
-    const message = response.status >= 500 && !hasMigrationHint
+    const providerCode = typeof detail === "object" && detail !== null && "code" in detail
+      ? String(detail.code)
+      : "";
+    const safeProviderFailure = response.status === 503
+      && (providerCode.startsWith("embedding_") || providerCode.startsWith("answer_"));
+    const message = response.status >= 500 && !hasMigrationHint && !safeProviderFailure
       ? `后端返回 HTTP ${response.status}，请检查 API 服务日志。`
       : detailMessage ?? `请求失败（HTTP ${response.status}）。`;
     throw new ApiError(message, response.status);

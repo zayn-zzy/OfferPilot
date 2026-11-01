@@ -64,15 +64,15 @@ bun run dev
 
 “资料问答”页允许添加项目/求职笔记，并检索已确认的简历与笔记回答问题。点击“建立 / 更新索引”后，资料按 900 字符片段（有重叠）切分并生成向量；问题检索当前账户的相似片段，模型只能依据这些片段作答。系统只保留模型引用中确实出现在检索片段里的原文；没有支持性引用时返回无证据结果。简历删除、笔记编辑/删除会同步删除相关索引片段；新资料需重新建立索引。
 
-向量生成使用独立的 OpenAI 兼容 Embeddings API，返回维度固定为 1536；问答复用已配置的 Chat Completions API。需要在仓库根 `.env`（Compose）或 `backend/.env`（本地 API）设置：
+向量生成使用独立的 OpenAI 兼容 Embeddings API，使用服务返回的原生维度；问答复用已配置的 Chat Completions API。两项服务可以使用不同的供应商和模型。需要在仓库根 `.env`（Compose）或 `backend/.env`（本地 API）设置：
 
 ```dotenv
 OFFERPILOT_EMBEDDING_BASE_URL=https://your-provider.example/v1
 OFFERPILOT_EMBEDDING_API_KEY=your-embedding-key
-OFFERPILOT_EMBEDDING_MODEL=your-1536-dimension-embedding-model
+OFFERPILOT_EMBEDDING_MODEL=your-embedding-model
 ```
 
-向量接口必须兼容 `POST /embeddings`。本地 SQLite 将向量保存在 JSON 列并在应用中计算余弦相似度；Compose PostgreSQL 使用 pgvector 的 `vector(1536)` 列、余弦近邻查询和 HNSW 索引。升级数据库后才可使用新增接口。已有简历不需要重新上传，但须先确认，然后进入 `/knowledge` 建立索引。
+向量接口必须兼容 `POST /embeddings`，同一模型需稳定返回相同维度。SQLite 将向量保存在 JSON 列并在应用中计算余弦相似度；Compose PostgreSQL 使用无固定维度的 pgvector 列执行账户范围内的精确余弦检索。模型或维度变更后需重新建立索引。升级数据库后才可使用新增接口。已有简历不需要重新上传，但须先确认，然后进入 `/knowledge` 建立索引。
 
 ## 后端开发与测试
 

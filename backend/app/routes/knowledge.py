@@ -1,5 +1,6 @@
 """Private notes, document indexing, and citation-backed knowledge answers."""
 
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -31,6 +32,7 @@ from app.services.knowledge import (
 )
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
+logger = logging.getLogger(__name__)
 MAX_INDEXED_CHUNKS = 2000
 MIN_RELEVANCE = 0.12
 
@@ -169,9 +171,19 @@ async def reindex_knowledge(
                 [item[4] for item in pending], settings
             )
         except KnowledgeServiceError as exc:
-            raise HTTPException(status_code=503, detail=exc.message) from None
+            logger.warning("Knowledge indexing provider failed (%s)", exc.code)
+            raise HTTPException(
+                status_code=503,
+                detail={"code": exc.code, "message": exc.message},
+            ) from None
         if len(vectors) != len(pending):
-            raise HTTPException(status_code=503, detail="向量服务没有返回全部资料片段，请重试。")
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "embedding_result_incomplete",
+                    "message": "向量服务没有返回全部资料片段，请重试。",
+                },
+            )
 
     source_snapshot = {
         (source_type, source_id): (source_name, content)
@@ -211,6 +223,7 @@ async def reindex_knowledge(
             chunk_index=chunk_index,
             content=content,
             embedding=vector,
+            embedding_dimensions=len(vector),
             embedding_model=model_name,
         )
         for (source_type, source_id, source_name, chunk_index, content), vector in zip(
@@ -250,16 +263,46 @@ async def ask_knowledge(
         )
     session.commit()
     try:
-        vectors, _ = await request.app.state.embedding_provider.embed([payload.question], settings)
+        vectors, embedding_model = await request.app.state.embedding_provider.embed(
+            [payload.question], settings
+        )
     except KnowledgeServiceError as exc:
-        raise HTTPException(status_code=503, detail=exc.message) from None
+        logger.warning("Knowledge query embedding provider failed (%s)", exc.code)
+        raise HTTPException(
+            status_code=503,
+            detail={"code": exc.code, "message": exc.message},
+        ) from None
     if len(vectors) != 1:
-        raise HTTPException(status_code=503, detail="向量服务没有返回检索结果，请重试。")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "embedding_result_incomplete",
+                "message": "向量服务没有返回检索结果，请重试。",
+            },
+        )
+
+    query_dimensions = len(vectors[0])
+    indexed_specs = set(
+        session.execute(
+            select(DocumentChunk.embedding_model, DocumentChunk.embedding_dimensions)
+            .where(DocumentChunk.user_id == owner_id)
+            .distinct()
+        ).all()
+    )
+    if indexed_specs != {(embedding_model, query_dimensions)}:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="向量模型或维度与现有索引不一致，请重新建立索引。",
+        )
+    session.commit()
 
     retrieved = retrieve_chunks(
         session,
         user_id=owner_id,
         query_vector=vectors[0],
+        embedding_model=embedding_model,
+        embedding_dimensions=query_dimensions,
         limit=payload.top_k,
     )
     session.commit()
@@ -275,7 +318,11 @@ async def ask_knowledge(
             payload.question, [chunk for chunk, _ in retrieved], settings
         )
     except KnowledgeServiceError as exc:
-        raise HTTPException(status_code=503, detail=exc.message) from None
+        logger.warning("Knowledge answer provider failed (%s)", exc.code)
+        raise HTTPException(
+            status_code=503,
+            detail={"code": exc.code, "message": exc.message},
+        ) from None
     answer, valid_citations = validate_answer_citations(generated, retrieved)
     if valid_citations:
         current_chunk_ids = set(
