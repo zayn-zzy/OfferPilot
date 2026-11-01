@@ -179,6 +179,27 @@ export type JobMatch = {
   disclaimer: string;
 };
 
+export type CompanyResearch = {
+  run_id: string;
+  job_id: string;
+  company_name: string;
+  job_title: string | null;
+  query: string;
+  researched_at: string;
+  is_stale: boolean;
+  summary: string;
+  findings: { claim: string; source_id: string; quote: string }[];
+  sources: {
+    source_id: string;
+    title: string;
+    url: string;
+    excerpt: string;
+    age: string | null;
+  }[];
+  no_evidence: boolean;
+  warning: string | null;
+};
+
 export type ExtractedJobField = {
   value: string | string[] | null;
   confidence: number;
@@ -267,7 +288,11 @@ export async function apiRequest<T = void>(path: string, options: RequestInit = 
       ? String(detail.code)
       : "";
     const safeProviderFailure = response.status === 503
-      && (providerCode.startsWith("embedding_") || providerCode.startsWith("answer_"));
+      && (
+        providerCode.startsWith("embedding_")
+        || providerCode.startsWith("answer_")
+        || providerCode.startsWith("research_")
+      );
     const message = response.status >= 500 && !hasMigrationHint && !safeProviderFailure
       ? `后端返回 HTTP ${response.status}，请检查 API 服务日志。`
       : detailMessage ?? `请求失败（HTTP ${response.status}）。`;

@@ -514,3 +514,32 @@ class JobMatchRead(BaseModel):
     criteria: list[MatchCriterionRead]
     skills: list[MatchSkillRead]
     disclaimer: str
+
+
+class CompanyResearchSourceRead(BaseModel):
+    source_id: str
+    title: str
+    url: str
+    excerpt: str
+    age: str | None = None
+
+
+class CompanyResearchFindingRead(BaseModel):
+    claim: str
+    source_id: str
+    quote: str
+
+
+class CompanyResearchRead(BaseModel):
+    run_id: UUID
+    job_id: UUID
+    company_name: str
+    job_title: str | None
+    query: str
+    researched_at: datetime
+    is_stale: bool
+    summary: str
+    findings: list[CompanyResearchFindingRead]
+    sources: list[CompanyResearchSourceRead]
+    no_evidence: bool
+    warning: str | None = None

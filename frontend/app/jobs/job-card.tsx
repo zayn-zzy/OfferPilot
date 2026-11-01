@@ -4,7 +4,9 @@ import { type FormEvent, useEffect, useState } from "react";
 import {
   APPLICATION_STAGES,
   APPLICATION_STAGE_LABELS,
+  ApiError,
   type ApplicationStatusEvent,
+  type CompanyResearch,
   type JobMatch,
   type JobPosting,
   type JobSourceEvidence,
@@ -116,6 +118,10 @@ export default function JobCard(props: JobCardProps) {
   const [evidenceError, setEvidenceError] = useState("");
   const [matchAnalysis, setMatchAnalysis] = useState<JobMatch | null>(null);
   const [matchLoading, setMatchLoading] = useState(false);
+  const [research, setResearch] = useState<CompanyResearch | null>(null);
+  const [researchOpen, setResearchOpen] = useState(false);
+  const [researchLoading, setResearchLoading] = useState(false);
+  const [researchError, setResearchError] = useState("");
   const hasDetails = Boolean(
     job.description || job.company_notes || job.education_requirement || job.industry
     || job.recruitment_url || job.company_website_url
@@ -184,6 +190,39 @@ export default function JobCard(props: JobCardProps) {
     }
   }
 
+  async function toggleCompanyResearch() {
+    if (researchOpen) {
+      setResearchOpen(false);
+      return;
+    }
+    setResearchOpen(true);
+    setResearchLoading(true);
+    setResearchError("");
+    try {
+      setResearch(await apiRequest<CompanyResearch>(`/api/v1/jobs/${job.id}/research`));
+    } catch (cause) {
+      if (!(cause instanceof ApiError && cause.status === 404)) {
+        setResearchError(cause instanceof Error ? cause.message : "无法读取公司研究结果。");
+      }
+    } finally {
+      setResearchLoading(false);
+    }
+  }
+
+  async function runCompanyResearch() {
+    setResearchLoading(true);
+    setResearchError("");
+    try {
+      setResearch(await apiRequest<CompanyResearch>(`/api/v1/jobs/${job.id}/research?refresh=true`, {
+        method: "POST",
+      }));
+    } catch (cause) {
+      setResearchError(cause instanceof Error ? cause.message : "公司研究失败。");
+    } finally {
+      setResearchLoading(false);
+    }
+  }
+
   return (
     <article aria-label={`${job.company_name || "未填写公司"} ${job.title || "未填写职位"}`} className="job-card" id={`job-${job.id}`} tabIndex={-1}>
       <div className="job-card-heading">
@@ -221,8 +260,40 @@ export default function JobCard(props: JobCardProps) {
         <button aria-expanded={panel === "application"} aria-controls={`job-progress-${job.id}`} className="job-quiet-action" disabled={busy} onClick={() => togglePanel("application")} type="button">{panel === "application" ? "收起投递记录" : "投递记录"}</button>
         {job.source_type === "agent" && <button aria-expanded={evidenceOpen} className="job-quiet-action" disabled={evidenceLoading} onClick={() => void toggleEvidence()} type="button">{evidenceLoading ? "读取依据中…" : evidenceOpen ? "收起抽取依据" : "抽取依据"}</button>}
         <button aria-expanded={Boolean(matchAnalysis)} className="job-quiet-action" disabled={matchLoading} onClick={() => void analyzeMatch()} type="button">{matchLoading ? "分析中…" : matchAnalysis ? "重新分析匹配" : "匹配分析"}</button>
+        <button aria-expanded={researchOpen} aria-controls={`job-research-${job.id}`} className="job-quiet-action" disabled={researchLoading || !job.company_name} onClick={() => void toggleCompanyResearch()} type="button">{researchLoading ? "读取中…" : researchOpen ? "收起公司研究" : "公司研究"}</button>
         <button className="job-quiet-action danger-text" disabled={busy} onClick={() => void remove()} type="button">删除</button>
       </div>
+      {researchOpen && <section className="company-research-panel" id={`job-research-${job.id}`} aria-label="公司公开信息研究">
+        <div className="job-match-heading"><h4>公司公开信息研究</h4><span>只读搜索 · Brave Search</span></div>
+        {researchLoading && <p className="job-match-disclaimer" role="status">正在搜索公开招聘信息并核验摘要…</p>}
+        {researchError && <p className="form-error" role="alert">{researchError}</p>}
+        {!researchLoading && !research && <div className="company-research-empty">
+          <p>搜索公开招聘页面和公司信息。结果会保留来源链接；搜索摘要不能替代官网核验。</p>
+          <button className="button button-primary" disabled={!job.company_name} onClick={() => void runCompanyResearch()} type="button">开始公司研究</button>
+        </div>}
+        {research && <>
+          <p className="company-research-summary">{research.summary}</p>
+          <p className="job-match-disclaimer">搜索时间：{new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(research.researched_at))} · 搜索词：{research.query}</p>
+          {research.is_stale && <p className="company-research-stale" role="status">该结果已超过 7 天，招聘信息可能变化，请重新搜索或打开来源核验。</p>}
+          {research.warning && <p className="form-error" role="status">{research.warning}</p>}
+          {research.findings.length > 0 && <ol className="company-research-findings">{research.findings.map((finding, index) => {
+            const source = research.sources.find((item) => item.source_id === finding.source_id);
+            return <li key={`${finding.source_id}-${index}`}>
+              <strong>{finding.claim}</strong>
+              <blockquote>{finding.quote}</blockquote>
+              {source && <a href={source.url} rel="noreferrer" target="_blank">来源：{source.title} ↗</a>}
+            </li>;
+          })}</ol>}
+          <details className="company-research-sources"><summary>查看全部搜索来源（{research.sources.length}）</summary>
+            {research.sources.length === 0 ? <p>搜索服务没有返回来源。</p> : <ul>{research.sources.map((source) => <li key={source.source_id}>
+              <a href={source.url} rel="noreferrer" target="_blank">{source.title} ↗</a>
+              {source.age && <small>{source.age}</small>}
+              <p>{source.excerpt}</p>
+            </li>)}</ul>}
+          </details>
+          <button className="job-quiet-action" disabled={researchLoading} onClick={() => void runCompanyResearch()} type="button">重新搜索</button>
+        </>}
+      </section>}
       {matchAnalysis && <section className="job-match-analysis" aria-label="岗位匹配分析">
         <div className="job-match-heading"><h4>匹配分析</h4><span>依据：{matchAnalysis.resume_filename}</span></div>
         <ul className="job-match-criteria">{matchAnalysis.criteria.map((criterion) => <li key={criterion.key}>

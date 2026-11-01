@@ -268,3 +268,24 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 - 后端 `.venv/bin/pytest -q`：49 项通过，新增覆盖 1024 维索引与问答、拒绝同次请求中的混合维度。前端 `bun run typecheck`、Python `compileall` 和 `git diff --check` 均通过。
 - 本机 SQLite 已迁移到 `20261101_0006`；迁移前备份为 `backend/storage/backups/offerpilot-before-0006-20261101.sqlite3`，权限 `0600`。运行中的 API `/health` 返回数据库正常。
 - 当前环境没有 PostgreSQL/pgvector 实例，因此没有声称完成真实 PostgreSQL 集成验证；PostgreSQL 查询和无固定维度列仍有 SQL 编译测试。
+
+## 第 5 步：MCP 与公司公开信息研究
+
+### 完成内容
+
+- 选用 Brave Search Web Search API 作为一个只读公开信息源。工具只提交搜索词并返回标题、URL、摘要片段和搜索时间；不抓取链接目标、不访问登录内容、不执行外部写操作。
+- 使用官方 MCP Python SDK v2 注册 `search_company_recruitment` 工具，并在 FastAPI 中通过 MCP Client 调用同一个工具。额外提供 `offerpilot-research-mcp` stdio 入口供兼容 MCP 的客户端连接。工具有输入长度/结果数校验、只读注解、12 秒搜索超时、每进程每分钟 30 次限流；API 对每账户执行每小时 10 次限流。
+- 岗位卡片增加“公司研究”折叠面板；按公司名和岗位名称搜索，展示事实摘要、逐项原文引用、全部来源链接与时间。相同岗位 30 分钟内复用结果；超过 7 天的报告显示过期提示，并可强制重新搜索。
+- Chat 模型只接收 Brave 返回的公开摘要片段，返回结构化事实、来源 ID 和原文引用。服务端校验来源属于本次搜索，且引用逐字存在于对应片段；无证据时保留来源并明确提示，不把模型错误或真实空结果伪装成搜索失败/无结果。
+- 复用 `AgentRun` 保存用户、岗位、查询词、公开来源、模型、状态、事件、引用和结果；研究 API 按用户检查岗位所有权，并提供读取最新成功结果的接口。Agent 岗位抽取任务列表只读取 `job_extraction` 类型，避免两类运行记录互相污染。
+- 新增 `OFFERPILOT_BRAVE_SEARCH_API_KEY` 和可配置搜索超时环境变量；Compose 会注入配置，README 说明模型与搜索服务的数据流。使用 MCP SDK v2 后，Python 最低版本升为 3.11；Docker API 镜像使用 Python 3.12。本模块没有新增数据库表或迁移。
+
+### 技术与上一版本的区别
+
+上一版本只支持个人资料 RAG 和结构化岗位匹配，没有只读外部搜索工具或带来源的公司调研。本次增加 MCP 标准工具调用、公开搜索 Provider Adapter、引用核验、用户范围的运行审计与研究面板；没有引入自动网页抓取、写操作、多 Agent 或定时任务。
+
+### 验证
+
+- 后端 `.venv/bin/pytest -o addopts='' -q`：59 项通过，其中新增 10 项覆盖 MCP Client/Server 调用、Brave 响应归一化、摘要 JSON、原文引用校验、结果缓存、账户级与进程级限流、失败记录、空结果和跨用户隔离。测试使用 Fake Provider/MockTransport，不调用真实外部搜索或模型服务。
+- 前端 `bun run typecheck`、依赖 `uv lock --check --offline`、Python `compileall`、`git diff --check`：通过；`uv sync --offline --extra dev` 已安装 MCP CLI 入口。
+- 本地 API `/health` 返回数据库正常；Next.js `/jobs` 和页面 JavaScript bundle 包含公司研究控件。当前运行环境未配置 Brave API Key，因此未执行真实 Brave 网络查询；接入前需在仓库根 `.env`（Compose）或 `backend/.env`（本地）配置该变量。

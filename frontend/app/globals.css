@@ -280,6 +280,17 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .job-match-skills li > strong { color: var(--teal); }
 .job-match-skills blockquote { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
 .job-match-disclaimer { margin: 12px 0 0; }
+.company-research-panel { margin-top: 14px; padding: 16px; border: 1px solid #dfe9e1; border-radius: 11px; background: #fbfdfb; }
+.company-research-empty p, .company-research-summary { color: var(--muted); font-size: 12px; line-height: 1.7; }
+.company-research-summary { margin: 12px 0; color: var(--ink); }
+.company-research-stale { padding: 8px 10px; border-radius: 7px; background: #fbf3e5; color: #805b20; font-size: 11px; line-height: 1.6; }
+.company-research-findings, .company-research-sources ul { margin: 12px 0; padding-left: 20px; }
+.company-research-findings li, .company-research-sources li { padding: 9px 0; border-top: 1px solid #edf1ed; font-size: 12px; line-height: 1.7; }
+.company-research-findings blockquote { margin: 5px 0; padding-left: 10px; border-left: 2px solid #b8cdc0; color: var(--muted); }
+.company-research-sources { margin-top: 12px; color: var(--muted); font-size: 12px; }
+.company-research-sources summary { cursor: pointer; }
+.company-research-sources small { margin-left: 8px; }
+.company-research-sources p { margin: 4px 0; line-height: 1.65; }
 
 @media (max-width: 600px) {
   .topbar, .dashboard-topbar { height: 68px; padding: 0 20px; }

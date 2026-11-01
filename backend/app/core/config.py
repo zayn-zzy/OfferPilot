@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     embedding_base_url: str = ""
     embedding_api_key: SecretStr = SecretStr("")
     embedding_model: str = Field(default="", max_length=120)
+    brave_search_api_key: SecretStr = SecretStr("")
+    research_timeout_seconds: float = Field(default=12.0, gt=0, le=60)
 
 
 @lru_cache

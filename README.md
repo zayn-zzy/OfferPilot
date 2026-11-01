@@ -74,6 +74,22 @@ OFFERPILOT_EMBEDDING_MODEL=your-embedding-model
 
 向量接口必须兼容 `POST /embeddings`，同一模型需稳定返回相同维度。SQLite 将向量保存在 JSON 列并在应用中计算余弦相似度；Compose PostgreSQL 使用无固定维度的 pgvector 列执行账户范围内的精确余弦检索。模型或维度变更后需重新建立索引。升级数据库后才可使用新增接口。已有简历不需要重新上传，但须先确认，然后进入 `/knowledge` 建立索引。
 
+### 公司公开信息研究与 MCP 搜索工具
+
+岗位卡片中的“公司研究”通过 Brave Search Web Search API 查找公开网页，并让配置的 Chat Completions 模型按字段生成摘要。每个研究结论都要引用搜索结果片段，后端会检查来源 ID 和引用原文；搜索结果、查询词、模型名和执行状态会留在当前用户对应的 Agent 任务记录中。点击来源链接可以打开原网页核验。相同岗位 30 分钟内复用搜索结果，每个账户每小时最多发起 10 次新研究；结果超过 7 天会标记为可能过期。搜索失败会显示明确错误，不会伪装成“没有结果”。MVP 不会自动抓取链接指向的页面，也不访问登录后内容。
+
+在仓库根 `.env`（Compose）或 `backend/.env`（本地 API）配置 `OFFERPILOT_BRAVE_SEARCH_API_KEY`。Brave Search API 需先开通计划并创建 API Key，调用用量依所选计划计费；密钥仅由后端读取。没有密钥时公司研究会提示配置问题，其他模块仍可使用。公开搜索片段会发送给已配置的 Chat Completions 服务生成摘要。参见 [Brave API 身份验证说明](https://api-dashboard.search.brave.com/documentation/guides/authentication)。
+
+项目也通过官方 MCP Python SDK 暴露只读 `search_company_recruitment` 工具。MCP 客户端可在后端目录启动本地 stdio 服务：
+
+```bash
+cd backend
+uv sync --extra dev
+uv run offerpilot-research-mcp
+```
+
+该工具仅接受搜索词和最多 10 条的结果数，不提供 URL 抓取、岗位写入或其他外部动作。SDK v2 要求 Python 3.11+；Docker API 使用 Python 3.12，本地 `uv` 环境需使用 Python 3.11 或更新版本。参见 [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)。
+
 ## 后端开发与测试
 
 ```bash

@@ -27,6 +27,7 @@ from app.routes.jobs import router as jobs_router
 from app.routes.knowledge import router as knowledge_router
 from app.routes.matching import router as matching_router
 from app.routes.profile import router as profile_router
+from app.routes.research import router as research_router
 from app.routes.resumes import router as resumes_router
 from app.schemas import HealthRead
 from app.services.job_extraction import (
@@ -38,6 +39,13 @@ from app.services.knowledge import (
     KnowledgeAnswerProvider,
     OpenAICompatibleEmbeddingProvider,
     OpenAICompatibleKnowledgeAnswerProvider,
+)
+from app.services.company_research import (
+    BraveSearchProvider,
+    CompanyResearchSummaryProvider,
+    OpenAICompatibleCompanyResearchSummarizer,
+    PublicSearchProvider,
+    create_company_research_mcp_server,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,6 +66,8 @@ def create_app(
     job_extraction_provider: JobExtractionProvider | None = None,
     embedding_provider: EmbeddingProvider | None = None,
     knowledge_answer_provider: KnowledgeAnswerProvider | None = None,
+    company_research_search_provider: PublicSearchProvider | None = None,
+    company_research_summarizer: CompanyResearchSummaryProvider | None = None,
 ) -> FastAPI:
     """Create an app instance, optionally injecting test settings and a database."""
 
@@ -113,6 +123,14 @@ def create_app(
     app.state.knowledge_answer_provider = (
         knowledge_answer_provider or OpenAICompatibleKnowledgeAnswerProvider()
     )
+    search_provider = company_research_search_provider or BraveSearchProvider()
+    app.state.company_research_search_provider = search_provider
+    app.state.company_research_summarizer = (
+        company_research_summarizer or OpenAICompatibleCompanyResearchSummarizer()
+    )
+    app.state.company_research_mcp_server = create_company_research_mcp_server(
+        app_settings, search_provider
+    )
 
     @app.exception_handler(DBAPIError)
     async def handle_database_error(request: Request, error: DBAPIError) -> JSONResponse:
@@ -147,6 +165,7 @@ def create_app(
     app.include_router(agent_router, prefix="/api/v1")
     app.include_router(knowledge_router, prefix="/api/v1")
     app.include_router(matching_router, prefix="/api/v1")
+    app.include_router(research_router, prefix="/api/v1")
 
     @app.get("/health", response_model=HealthRead, tags=["system"])
     def health(

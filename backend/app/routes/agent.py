@@ -92,7 +92,7 @@ def _owned_task(session: Session, user: User, task_id: UUID) -> AgentRun:
     run = session.scalar(
         select(AgentRun).where(AgentRun.id == task_id, AgentRun.user_id == user.id)
     )
-    if run is None:
+    if run is None or run.task_type != "job_extraction":
         raise HTTPException(status_code=404, detail="Agent 任务不存在")
     return run
 
@@ -233,7 +233,7 @@ def list_agent_tasks(
         raise HTTPException(status_code=422, detail="limit 必须在 1 到 100 之间")
     runs = session.scalars(
         select(AgentRun)
-        .where(AgentRun.user_id == user.id)
+        .where(AgentRun.user_id == user.id, AgentRun.task_type == "job_extraction")
         .order_by(AgentRun.created_at.desc())
         .limit(limit)
     )
