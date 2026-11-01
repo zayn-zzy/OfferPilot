@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from app.core.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
-BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
+TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 MAX_SEARCH_RESULTS = 10
 MCP_SEARCH_RATE_LIMIT_PER_MINUTE = 30
 
@@ -88,8 +88,8 @@ class PublicSearchProvider(Protocol):
     ) -> list[PublicSearchSource]: ...
 
 
-class BraveSearchProvider:
-    """Use Brave's documented Web Search API as a read-only public source."""
+class TavilySearchProvider:
+    """Use Tavily's Search API as a read-only public source."""
 
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self._transport = transport
@@ -97,11 +97,11 @@ class BraveSearchProvider:
     async def search(
         self, query: str, count: int, settings: Settings
     ) -> list[PublicSearchSource]:
-        token = settings.brave_search_api_key.get_secret_value().strip()
+        token = settings.tavily_api_key.get_secret_value().strip()
         if not token:
             raise CompanyResearchError(
                 "research_not_configured",
-                "公司研究尚未配置公开搜索服务，请设置 OFFERPILOT_BRAVE_SEARCH_API_KEY。",
+                "公司研究尚未配置公开搜索服务，请设置 OFFERPILOT_TAVILY_API_KEY。",
             )
         normalized_query = query.strip()
         if not 3 <= len(normalized_query) <= 600 or len(normalized_query.split()) > 75:
@@ -112,41 +112,45 @@ class BraveSearchProvider:
             async with httpx.AsyncClient(
                 timeout=settings.research_timeout_seconds, transport=self._transport
             ) as client:
-                response = await client.get(
-                    BRAVE_SEARCH_URL,
+                response = await client.post(
+                    TAVILY_SEARCH_URL,
                     headers={
                         "Accept": "application/json",
-                        "X-Subscription-Token": token,
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
                     },
-                    params={
-                        "q": normalized_query,
-                        "count": bounded_count,
-                        "country": "CN",
-                        "search_lang": "zh",
-                        "safesearch": "moderate",
-                        "result_filter": "web",
+                    json={
+                        "query": normalized_query,
+                        "max_results": bounded_count,
+                        "search_depth": "basic",
+                        "topic": "general",
+                        "include_answer": False,
                     },
                 )
-            if response.status_code == 429:
+            if response.status_code in {429, 432, 433}:
                 raise CompanyResearchError(
-                    "research_rate_limited", "公开搜索服务请求过于频繁，请稍后重试。"
+                    "research_rate_limited", "Tavily 搜索请求达到频率或额度限制，请稍后重试。"
+                )
+            if response.status_code in {401, 403}:
+                raise CompanyResearchError(
+                    "research_invalid_api_key", "Tavily API Key 无效或当前账户无权搜索，请检查配置。"
                 )
             if response.status_code >= 400:
                 raise CompanyResearchError(
-                    "research_unavailable", "公开搜索服务暂时不可用，请检查配置后重试。"
+                    "research_unavailable", "Tavily 搜索服务暂时不可用，请稍后重试。"
                 )
             payload = response.json()
-            web_results = payload["web"]["results"]
-            if not isinstance(web_results, list):
+            results = payload["results"]
+            if not isinstance(results, list):
                 raise ValueError("Search results must be an array")
             sources: list[PublicSearchSource] = []
             seen_urls: set[str] = set()
-            for row in web_results:
+            for row in results:
                 if not isinstance(row, dict):
                     continue
                 title = row.get("title")
                 url = row.get("url")
-                excerpt = row.get("description")
+                excerpt = row.get("content")
                 if not all(isinstance(value, str) and value.strip() for value in (title, url, excerpt)):
                     continue
                 canonical_url = url.split("#", 1)[0].rstrip("/")
@@ -157,11 +161,15 @@ class BraveSearchProvider:
                     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username:
                         continue
                     source = PublicSearchSource(
-                        source_id=f"brave-{len(sources) + 1}",
+                        source_id=f"web-{len(sources) + 1}",
                         title=title.strip()[:500],
                         url=canonical_url[:2048],
                         excerpt=excerpt.strip()[:3000],
-                        age=(row.get("age")[:200] if isinstance(row.get("age"), str) else None),
+                        age=(
+                            row.get("published_date")[:200]
+                            if isinstance(row.get("published_date"), str)
+                            else None
+                        ),
                     )
                 except (ValueError, TypeError):
                     continue
@@ -174,11 +182,11 @@ class BraveSearchProvider:
             raise
         except httpx.TimeoutException as exc:
             raise CompanyResearchError(
-                "research_timeout", "公开搜索服务响应超时，请稍后重试。"
+                "research_timeout", "Tavily 搜索服务响应超时，请稍后重试。"
             ) from exc
         except (httpx.HTTPError, ValueError, KeyError, TypeError):
             raise CompanyResearchError(
-                "research_invalid_response", "公开搜索服务返回内容无法校验，请稍后重试。"
+                "research_invalid_response", "Tavily 搜索服务返回内容无法校验，请稍后重试。"
             ) from None
 
 
@@ -347,7 +355,7 @@ def create_company_research_mcp_server(
             }
         return {
             "ok": True,
-            "provider": "brave_search",
+            "provider": "tavily_search",
             "searched_at": datetime.now(timezone.utc).isoformat(),
             "sources": [source.model_dump(mode="json") for source in sources],
         }
@@ -359,7 +367,7 @@ def run_company_research_mcp() -> None:
     """Start the stdio MCP server for local MCP-compatible clients."""
 
     settings = get_settings()
-    server = create_company_research_mcp_server(settings, BraveSearchProvider())
+    server = create_company_research_mcp_server(settings, TavilySearchProvider())
     server.run(transport="stdio")
 
 

@@ -76,9 +76,9 @@ OFFERPILOT_EMBEDDING_MODEL=your-embedding-model
 
 ### 公司公开信息研究与 MCP 搜索工具
 
-岗位卡片中的“公司研究”通过 Brave Search Web Search API 查找公开网页，并让配置的 Chat Completions 模型按字段生成摘要。每个研究结论都要引用搜索结果片段，后端会检查来源 ID 和引用原文；搜索结果、查询词、模型名和执行状态会留在当前用户对应的 Agent 任务记录中。点击来源链接可以打开原网页核验。相同岗位 30 分钟内复用搜索结果，每个账户每小时最多发起 10 次新研究；结果超过 7 天会标记为可能过期。搜索失败会显示明确错误，不会伪装成“没有结果”。MVP 不会自动抓取链接指向的页面，也不访问登录后内容。
+岗位卡片中的“公司研究”通过 Tavily Search API 查找公开网页，并让配置的 Chat Completions 模型按字段生成摘要。每个研究结论都要引用搜索结果片段，后端会检查来源 ID 和引用原文；搜索结果、查询词、模型名和执行状态会留在当前用户对应的 Agent 任务记录中。点击来源链接可以打开原网页核验。相同岗位 30 分钟内复用搜索结果，每个账户每小时最多发起 10 次新研究；结果超过 7 天会标记为可能过期。搜索失败会显示明确错误，不会伪装成“没有结果”。MVP 不会自动抓取链接指向的页面，也不访问登录后内容。
 
-在仓库根 `.env`（Compose）或 `backend/.env`（本地 API）配置 `OFFERPILOT_BRAVE_SEARCH_API_KEY`。Brave Search API 需先开通计划并创建 API Key，调用用量依所选计划计费；密钥仅由后端读取。没有密钥时公司研究会提示配置问题，其他模块仍可使用。公开搜索片段会发送给已配置的 Chat Completions 服务生成摘要。参见 [Brave API 身份验证说明](https://api-dashboard.search.brave.com/documentation/guides/authentication)。
+在仓库根 `.env`（Compose）或 `backend/.env`（本地 API）配置 `OFFERPILOT_TAVILY_API_KEY`。密钥仅由后端读取，不要提交 `.env` 或把 Key 放到前端；没有密钥时公司研究会提示配置问题，其他模块仍可使用。公开搜索片段会发送给已配置的 Chat Completions 服务生成摘要。Tavily 使用 Bearer Token 认证，搜索请求发送至 `https://api.tavily.com/search`；参见 [Tavily Search API 说明](https://help.tavily.com/articles/4840311948-tavily-search-api)。
 
 项目也通过官方 MCP Python SDK 暴露只读 `search_company_recruitment` 工具。MCP 客户端可在后端目录启动本地 stdio 服务：
 

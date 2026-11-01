@@ -41,7 +41,7 @@ from app.services.knowledge import (
     OpenAICompatibleKnowledgeAnswerProvider,
 )
 from app.services.company_research import (
-    BraveSearchProvider,
+    TavilySearchProvider,
     CompanyResearchSummaryProvider,
     OpenAICompatibleCompanyResearchSummarizer,
     PublicSearchProvider,
@@ -123,7 +123,7 @@ def create_app(
     app.state.knowledge_answer_provider = (
         knowledge_answer_provider or OpenAICompatibleKnowledgeAnswerProvider()
     )
-    search_provider = company_research_search_provider or BraveSearchProvider()
+    search_provider = company_research_search_provider or TavilySearchProvider()
     app.state.company_research_search_provider = search_provider
     app.state.company_research_summarizer = (
         company_research_summarizer or OpenAICompatibleCompanyResearchSummarizer()

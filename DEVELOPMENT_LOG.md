@@ -271,6 +271,8 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 
 ## 第 5 步：MCP 与公司公开信息研究
 
+> 本节验证记录对应首次使用 Brave Provider 的实现；后续已按用户可用的 API Key 切换到 Tavily，当前配置与验证见本节后的“搜索服务切换为 Tavily”。
+
 ### 完成内容
 
 - 选用 Brave Search Web Search API 作为一个只读公开信息源。工具只提交搜索词并返回标题、URL、摘要片段和搜索时间；不抓取链接目标、不访问登录内容、不执行外部写操作。
@@ -289,3 +291,11 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 - 后端 `.venv/bin/pytest -o addopts='' -q`：59 项通过，其中新增 10 项覆盖 MCP Client/Server 调用、Brave 响应归一化、摘要 JSON、原文引用校验、结果缓存、账户级与进程级限流、失败记录、空结果和跨用户隔离。测试使用 Fake Provider/MockTransport，不调用真实外部搜索或模型服务。
 - 前端 `bun run typecheck`、依赖 `uv lock --check --offline`、Python `compileall`、`git diff --check`：通过；`uv sync --offline --extra dev` 已安装 MCP CLI 入口。
 - 本地 API `/health` 返回数据库正常；Next.js `/jobs` 和页面 JavaScript bundle 包含公司研究控件。当前运行环境未配置 Brave API Key，因此未执行真实 Brave 网络查询；接入前需在仓库根 `.env`（Compose）或 `backend/.env`（本地）配置该变量。
+
+## 第 5 步补充：搜索服务切换为 Tavily
+
+- 根据实际可用的 Tavily API Key，将默认搜索 Provider 从 Brave Search 切换为 Tavily Search API。MCP 工具、岗位研究页面、结果缓存、来源链接、引用校验和 AgentRun 持久化逻辑保持不变。
+- 后端通过 `POST https://api.tavily.com/search` 和 Bearer Token 认证，只请求基础网页搜索；将 Tavily 的 `title`、`url`、`content`、`published_date` 归一化为项目统一来源结构。新增无效 Key、额度/频率限制的安全错误提示，Key 不写日志、不发送给浏览器。
+- 新配置项为 `OFFERPILOT_TAVILY_API_KEY`；Compose 将根目录 `.env` 中的配置注入 API 容器。本地 API 从 `backend/.env` 读取。更新 `.env.example` 和 README。没有数据库结构变化。
+- 搜索适配器及摘要 Provider 定向测试：5 项通过，使用 HTTPX MockTransport 验证 Tavily endpoint、Bearer 认证、请求参数、结果归一化、危险 URL 丢弃、无效 Key 和额度/频率错误映射；没有使用真实 API Key 发起外部请求。Python 编译检查、前端类型检查和 `git diff --check` 通过。
+- 公司研究完整测试文件未能完成：首个 ASGI 集成用例在账户注册请求处等待超过一分钟，尚未进入 Tavily Provider 调用；已中断该次运行。需要在可正常完成注册集成测试的环境补跑回归。

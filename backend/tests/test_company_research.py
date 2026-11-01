@@ -17,12 +17,12 @@ from app.core.config import Settings
 from app.main import create_app
 from app.models import AgentRun, Base
 from app.services.company_research import (
-    BraveSearchProvider,
     CompanyResearchDraft,
     CompanyResearchError,
     CompanyResearchFindingCandidate,
     OpenAICompatibleCompanyResearchSummarizer,
     PublicSearchSource,
+    TavilySearchProvider,
     call_company_search_tool,
     create_company_research_mcp_server,
     validate_research_findings,
@@ -32,14 +32,14 @@ from app.services.company_research import (
 def make_sources() -> list[PublicSearchSource]:
     return [
         PublicSearchSource(
-            source_id="brave-1",
+            source_id="web-1",
             title="星河科技校园招聘",
             url="https://careers.example.com/campus",
             excerpt="星河科技 2027 届校园招聘已启动，招聘方向包含后端开发工程师。",
             age="2 days ago",
         ),
         PublicSearchSource(
-            source_id="brave-2",
+            source_id="web-2",
             title="星河科技官网",
             url="https://www.example.com/about",
             excerpt="星河科技专注于云服务与企业软件。",
@@ -79,7 +79,7 @@ class FakeResearchSummarizer:
                 findings=[
                     CompanyResearchFindingCandidate(
                         claim="搜索结果提到星河科技已启动 2027 届校园招聘。",
-                        source_id="brave-1",
+                        source_id="web-1",
                         quote=quote,
                     ),
                     CompanyResearchFindingCandidate(
@@ -109,7 +109,7 @@ def test_app(tmp_path: Path) -> Generator[FastAPI, None, None]:
         secret_key="company-research-test-secret-long-enough",
         allowed_origins=["http://localhost:3000"],
         storage_dir=tmp_path / "storage",
-        brave_search_api_key="test-search-key",
+        tavily_api_key="test-search-key",
     )
     search_provider = FakePublicSearchProvider()
     summarizer = FakeResearchSummarizer()
@@ -174,7 +174,7 @@ async def test_company_research_calls_mcp_and_persists_verified_findings(
     assert body["findings"] == [
         {
             "claim": "搜索结果提到星河科技已启动 2027 届校园招聘。",
-            "source_id": "brave-1",
+            "source_id": "web-1",
             "quote": "星河科技 2027 届校园招聘已启动",
         }
     ]
@@ -191,7 +191,7 @@ async def test_company_research_calls_mcp_and_persists_verified_findings(
         assert run is not None
         assert run.status == "succeeded"
         assert run.model_name == "test-chat-model"
-        assert run.result["search_provider"] == "brave_search"
+        assert run.result["search_provider"] == "tavily_search"
 
     restored = await client.get(f"/api/v1/jobs/{job['id']}/research")
     assert restored.status_code == 200
@@ -309,50 +309,81 @@ async def test_empty_search_is_not_reported_as_provider_failure(
 
 
 @pytest.mark.anyio
-async def test_brave_search_provider_normalizes_public_results_without_fetching_urls() -> None:
+async def test_tavily_search_provider_normalizes_public_results_without_fetching_urls() -> None:
     settings = Settings(
         _env_file=None,
-        brave_search_api_key="test-brave-secret",
+        tavily_api_key="test-tavily-secret",
         research_timeout_seconds=5,
     )
 
     async def search_response(request):
-        assert request.url.host == "api.search.brave.com"
-        assert request.headers["X-Subscription-Token"] == "test-brave-secret"
-        assert request.url.params["count"] == "2"
-        assert request.url.params["country"] == "CN"
-        assert request.url.params["result_filter"] == "web"
+        assert request.url.host == "api.tavily.com"
+        assert request.url.path == "/search"
+        assert request.headers["Authorization"] == "Bearer test-tavily-secret"
+        body = json.loads(request.content)
+        assert body == {
+            "query": "星河科技 招聘",
+            "max_results": 2,
+            "search_depth": "basic",
+            "topic": "general",
+            "include_answer": False,
+        }
         return Response(
             200,
             json={
-                "web": {
-                    "results": [
-                        {
-                            "title": "校园招聘",
-                            "url": "https://careers.example.com/campus#roles",
-                            "description": "公司 2027 校园招聘启动。",
-                            "age": "2 days ago",
-                        },
-                        {
-                            "title": "重复网址",
-                            "url": "https://careers.example.com/campus/",
-                            "description": "重复结果。",
-                        },
-                        {
-                            "title": "不允许协议",
-                            "url": "javascript:alert(1)",
-                            "description": "不安全网址应丢弃。",
-                        },
-                    ]
-                }
+                "results": [
+                    {
+                        "title": "校园招聘",
+                        "url": "https://careers.example.com/campus#roles",
+                        "content": "公司 2027 校园招聘启动。",
+                        "published_date": "2026-10-31",
+                    },
+                    {
+                        "title": "重复网址",
+                        "url": "https://careers.example.com/campus/",
+                        "content": "重复结果。",
+                    },
+                    {
+                        "title": "不允许协议",
+                        "url": "javascript:alert(1)",
+                        "content": "不安全网址应丢弃。",
+                    },
+                ]
             },
         )
 
-    provider = BraveSearchProvider(transport=MockTransport(search_response))
+    provider = TavilySearchProvider(transport=MockTransport(search_response))
     sources = await provider.search("星河科技 招聘", 2, settings)
     assert len(sources) == 1
     assert sources[0].url == "https://careers.example.com/campus"
-    assert sources[0].source_id == "brave-1"
+    assert sources[0].source_id == "web-1"
+    assert sources[0].age == "2026-10-31"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("status_code", "expected_code"),
+    [
+        (401, "research_invalid_api_key"),
+        (429, "research_rate_limited"),
+        (432, "research_rate_limited"),
+    ],
+)
+async def test_tavily_search_provider_maps_auth_and_quota_errors_safely(
+    status_code: int, expected_code: str
+) -> None:
+    settings = Settings(_env_file=None, tavily_api_key="test-tavily-secret")
+
+    async def error_response(request):
+        assert request.headers["Authorization"] == "Bearer test-tavily-secret"
+        return Response(status_code, json={"error": "private provider response"})
+
+    provider = TavilySearchProvider(transport=MockTransport(error_response))
+    with pytest.raises(CompanyResearchError) as exc_info:
+        await provider.search("星河科技 校招", 5, settings)
+
+    assert exc_info.value.code == expected_code
+    assert "private provider response" not in exc_info.value.message
 
 
 @pytest.mark.anyio
@@ -382,12 +413,12 @@ async def test_chat_summarizer_requests_cited_json_and_drops_unsupported_claims(
                                     "findings": [
                                         {
                                             "claim": "招聘方向包含后端开发工程师。",
-                                            "source_id": "brave-1",
+                                            "source_id": "web-1",
                                             "quote": "招聘方向包含后端开发工程师",
                                         },
                                         {
                                             "claim": "模型生成的无依据截止日期。",
-                                            "source_id": "brave-1",
+                                            "source_id": "web-1",
                                             "quote": "网申截止日期为 12 月 1 日",
                                         },
                                     ]
@@ -416,7 +447,7 @@ async def test_chat_summarizer_requests_cited_json_and_drops_unsupported_claims(
 async def test_mcp_search_tool_has_a_per_process_rate_limit() -> None:
     settings = Settings(
         _env_file=None,
-        brave_search_api_key="test-search-key",
+        tavily_api_key="test-search-key",
     )
     provider = FakePublicSearchProvider()
     server = create_company_research_mcp_server(settings, provider)

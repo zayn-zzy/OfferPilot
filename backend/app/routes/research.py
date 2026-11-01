@@ -245,7 +245,7 @@ async def research_company_for_job(
         "sources": [source.model_dump(mode="json") for source in sources],
         "no_evidence": no_evidence,
         "warning": warning,
-        "search_provider": "brave_search",
+        "search_provider": "tavily_search",
     }
     current_run.result = result
     current_run.status = "succeeded"
