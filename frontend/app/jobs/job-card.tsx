@@ -170,7 +170,7 @@ export default function JobCard(props: JobCardProps) {
   }
 
   return (
-    <article aria-label={`${job.company_name || "未填写公司"} ${job.title || "未填写职位"}`} className="job-card">
+    <article aria-label={`${job.company_name || "未填写公司"} ${job.title || "未填写职位"}`} className="job-card" id={`job-${job.id}`} tabIndex={-1}>
       <div className="job-card-heading">
         <div>
           <p className="job-company">{job.company_name || "未填写公司"}</p>

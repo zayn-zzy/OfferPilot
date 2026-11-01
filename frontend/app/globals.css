@@ -212,6 +212,7 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .job-filter-form .button { min-height: 43px; padding: 0 15px; }
 .job-card-list { display: grid; gap: 14px; }
 .job-card { padding: 21px 23px; border: 1px solid var(--line); border-radius: 14px; background: white; box-shadow: 0 8px 26px #244b3807; }
+.job-card:focus { outline: 2px solid #76aa9b; outline-offset: 3px; }
 .job-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .job-company { margin: 0 0 5px; color: var(--teal); font-size: 12px; font-weight: 700; }
 .job-card h3 { margin: 0; font-size: 18px; letter-spacing: -.025em; }

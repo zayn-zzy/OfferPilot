@@ -2,8 +2,10 @@
 
 import csv
 from collections.abc import AsyncGenerator, Generator
+from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from fastapi import FastAPI
@@ -14,7 +16,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.config import Settings
 from app.main import create_app
-from app.models import Base
+from app.models import Base, JobPosting
 from app.services.job_csv import CSV_HEADERS
 
 
@@ -100,6 +102,41 @@ async def test_jobs_require_authentication(client: AsyncClient) -> None:
     response = await client.get("/api/v1/jobs")
 
     assert response.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_newest_jobs_are_listed_first_without_changing_deadline_filter(
+    client: AsyncClient, test_app: FastAPI
+) -> None:
+    """A new late-deadline job stays visible before older urgent records."""
+
+    await register(client, "newest-first@example.com")
+    saved = []
+    for title, deadline in (
+        ("旧岗位", "2026-11-15"),
+        ("新岗位", "2027-01-31"),
+        ("新岗位未注明截止日期", None),
+    ):
+        response = await client.post(
+            "/api/v1/jobs",
+            json=job_payload(title=title, deadline=deadline, source_url=None),
+        )
+        assert response.status_code == 201
+        saved.append(response.json())
+
+    with test_app.state.session_factory() as session:
+        for index, job_data in enumerate(saved):
+            job = session.get(JobPosting, UUID(job_data["id"]))
+            assert job is not None
+            job.created_at = datetime(2026, 1 if index == 0 else 2, 1, tzinfo=timezone.utc)
+        session.commit()
+
+    listed = await client.get("/api/v1/jobs")
+    newest_ids = sorted([saved[1]["id"], saved[2]["id"]], reverse=True)
+    assert [job["id"] for job in listed.json()] == [*newest_ids, saved[0]["id"]]
+
+    before_deadline = await client.get("/api/v1/jobs?deadline_before=2026-12-01")
+    assert [job["id"] for job in before_deadline.json()] == [saved[0]["id"]]
 
 
 @pytest.mark.anyio

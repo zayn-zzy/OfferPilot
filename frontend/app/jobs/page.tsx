@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   APPLICATION_STAGES,
   APPLICATION_STAGE_LABELS,
@@ -40,8 +40,12 @@ export default function JobsPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [requiresLogin, setRequiresLogin] = useState(false);
+  const [savedJobId, setSavedJobId] = useState<string | null>(null);
+  const listRequestVersion = useRef(0);
+  const pendingSavedJobFocus = useRef<string | null>(null);
 
-  async function loadJobs(nextFilters: Filters = filters) {
+  async function loadJobs(nextFilters: Filters = filters, visibleJob?: JobPosting) {
+    const requestVersion = ++listRequestVersion.current;
     setError("");
     const params = new URLSearchParams();
     if (nextFilters.search.trim()) params.set("search", nextFilters.search.trim());
@@ -52,22 +56,51 @@ export default function JobsPage() {
     try {
       const query = params.toString();
       const result = await apiRequest<JobPosting[]>(`/api/v1/jobs${query ? `?${query}` : ""}`);
-      setJobs(result);
+      if (requestVersion !== listRequestVersion.current) return;
+      if (visibleJob) {
+        const current = result.find((job) => job.id === visibleJob.id) ?? visibleJob;
+        pendingSavedJobFocus.current = current.id;
+        setJobs([current, ...result.filter((job) => job.id !== current.id)]);
+      } else {
+        setJobs(result);
+      }
       setRequiresLogin(false);
     } catch (cause) {
+      if (requestVersion !== listRequestVersion.current) return;
       setError(apiMessage(cause));
       setRequiresLogin(cause instanceof ApiError && cause.status === 401);
     } finally {
-      setLoading(false);
+      if (requestVersion === listRequestVersion.current) setLoading(false);
     }
   }
 
-  async function resetFiltersAndReload() {
+  async function showSavedJobs(saved: JobPosting[], message: string) {
+    // A pre-save list response must not replace the newly confirmed records.
+    listRequestVersion.current += 1;
     const nextFilters = { ...DEFAULT_FILTERS };
+    const latestFirst = [...saved].sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id));
+    const savedIds = new Set(latestFirst.map((job) => job.id));
+    pendingSavedJobFocus.current = latestFirst[0]?.id ?? null;
+    setSavedJobId(latestFirst[0]?.id ?? null);
     setFilters(nextFilters);
     setDraftFilters(nextFilters);
-    await loadJobs(nextFilters);
+    setJobs((current) => [...latestFirst, ...current.filter((job) => !savedIds.has(job.id))]);
+    setLoading(false);
+    setRequiresLogin(false);
+    setError("");
+    setSuccess(message);
+    await loadJobs(nextFilters, latestFirst[0]);
   }
+
+  useEffect(() => {
+    const jobId = pendingSavedJobFocus.current;
+    if (!jobId) return;
+    const card = document.getElementById(`job-${jobId}`);
+    if (!card) return;
+    pendingSavedJobFocus.current = null;
+    card.scrollIntoView({ block: "center" });
+    card.focus({ preventScroll: true });
+  }, [jobs]);
 
   async function previewCsv(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -119,8 +152,7 @@ export default function JobsPage() {
       setCsvFile(null);
       setCsvPreview(null);
       setSelectedCsvRows([]);
-      setSuccess(`已导入 ${imported.length} 条岗位。可以在岗位列表中继续编辑。`);
-      await resetFiltersAndReload();
+      await showSavedJobs(imported, `已导入 ${imported.length} 条岗位。可以在岗位列表中继续编辑。`);
     } catch (cause) {
       setError(apiMessage(cause));
     } finally {
@@ -152,13 +184,12 @@ export default function JobsPage() {
 
   async function createJob(payload: JobPostingWrite) {
     setSuccess("");
-    await apiRequest<JobPosting>("/api/v1/jobs", {
+    const saved = await apiRequest<JobPosting>("/api/v1/jobs", {
       method: "POST",
       body: JSON.stringify(payload),
     });
     setCreatePanel(null);
-    setSuccess("岗位已保存。");
-    await resetFiltersAndReload();
+    await showSavedJobs([saved], "岗位已保存。");
   }
 
   async function saveJob(job: JobPosting, payload: JobPostingWrite) {
@@ -173,6 +204,7 @@ export default function JobsPage() {
   async function deleteJob(job: JobPosting) {
     await apiRequest(`/api/v1/jobs/${job.id}`, { method: "DELETE" });
     setJobs((current) => current.filter((item) => item.id !== job.id));
+    setSavedJobId(null);
     setSuccess("岗位已删除。");
   }
 
@@ -200,6 +232,8 @@ export default function JobsPage() {
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setSuccess("");
+    setSavedJobId(null);
     setFilters(draftFilters);
     void loadJobs(draftFilters);
   }
@@ -228,7 +262,7 @@ export default function JobsPage() {
       </section>
 
       {error && <div className="profile-message profile-error" role="alert">{error}{requiresLogin && <> <Link href="/login">去登录</Link></>}</div>}
-      {success && <div className="profile-message profile-success" role="status">{success}</div>}
+      {success && <div className="profile-message profile-success" role="status">{success}{savedJobId && <> <a className="text-link" href={`#job-${savedJobId}`}>查看岗位</a></>}</div>}
 
       {createPanel === "csv" && <section className="profile-panel job-form-panel csv-import-panel">
         <div className="profile-panel-heading">
@@ -341,10 +375,9 @@ export default function JobsPage() {
 
       {createPanel === "extract" && <section className="profile-panel job-form-panel">
         <div className="profile-panel-heading"><div><p className="eyebrow">Agent 岗位抽取</p><h2>从招聘原文提取岗位字段</h2></div></div>
-        <JobExtractionPanel onCancel={() => setCreatePanel(null)} onJobCreated={() => {
+        <JobExtractionPanel onCancel={() => setCreatePanel(null)} onJobCreated={(saved) => {
           setCreatePanel(null);
-          setSuccess("岗位已保存，原文和字段依据已关联。可在岗位卡片中查看。");
-          void resetFiltersAndReload();
+          void showSavedJobs([saved], "AI 提取的岗位已保存，原文和字段依据已关联。");
         }} />
       </section>}
 

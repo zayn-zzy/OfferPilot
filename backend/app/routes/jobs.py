@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import Response
-from sqlalchemy import String, case, cast, func, or_, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -280,9 +280,8 @@ def list_jobs(
         )
 
     statement = statement.order_by(
-        case((JobPosting.deadline.is_(None), 1), else_=0),
-        JobPosting.deadline.asc(),
         JobPosting.created_at.desc(),
+        JobPosting.id.desc(),
     ).limit(limit).offset(offset)
     rows = session.execute(statement).all()
     return [_to_read(job, company_row, application) for job, company_row, application in rows]

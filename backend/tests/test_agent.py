@@ -72,6 +72,7 @@ def test_app(tmp_path: Path) -> Generator[FastAPI, None, None]:
     Base.metadata.create_all(engine)
     factory: sessionmaker[Session] = sessionmaker(bind=engine, expire_on_commit=False)
     settings = Settings(
+        _env_file=None,
         environment="test",
         database_url="sqlite://",
         secret_key="agent-test-secret-that-is-long-enough-for-testing",
@@ -282,6 +283,7 @@ async def test_provider_adapter_validates_json_and_removes_unsupported_quotes() 
 
     provider = OpenAICompatibleJobExtractionProvider(transport=httpx.MockTransport(respond))
     settings = Settings(
+        _env_file=None,
         llm_base_url="https://model.example/v1",
         llm_api_key="test-api-key",
         llm_model="test-model",
@@ -297,6 +299,14 @@ async def test_provider_adapter_validates_json_and_removes_unsupported_quotes() 
 async def test_provider_adapter_fails_clearly_when_not_configured() -> None:
     provider = OpenAICompatibleJobExtractionProvider()
     with pytest.raises(JobExtractionError) as error:
-        await provider.extract(SOURCE_TEXT, Settings())
+        await provider.extract(
+            SOURCE_TEXT,
+            Settings(
+                _env_file=None,
+                llm_base_url="",
+                llm_api_key="",
+                llm_model="",
+            ),
+        )
     assert error.value.code == "provider_not_configured"
     assert "OFFERPILOT_LLM_API_KEY" in error.value.message

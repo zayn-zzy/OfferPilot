@@ -157,6 +157,7 @@ export default function JobExtractionPanel({ onJobCreated, onCancel }: JobExtrac
       });
       setTask(created);
       setEvents(created.events);
+      if (created.status === "succeeded") setDraft(draftFromTask(created));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "无法创建岗位解析任务。");
     } finally {
@@ -171,6 +172,7 @@ export default function JobExtractionPanel({ onJobCreated, onCancel }: JobExtrac
       const retried = await apiRequest<AgentTask>(`/api/v1/agent/tasks/${task.id}/retry`, { method: "POST" });
       setTask(retried);
       setEvents(retried.events);
+      if (retried.status === "succeeded") setDraft(draftFromTask(retried));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "任务重试失败。");
     }
@@ -184,6 +186,23 @@ export default function JobExtractionPanel({ onJobCreated, onCancel }: JobExtrac
       startAnother();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "删除任务失败。");
+    }
+  }
+
+  async function openSavedJob() {
+    if (!task?.job_id) {
+      setError("该任务没有可查看的关联岗位。");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const saved = await apiRequest<JobPosting>(`/api/v1/jobs/${task.job_id}`);
+      onJobCreated(saved);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "无法读取已保存的岗位。");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -270,6 +289,7 @@ export default function JobExtractionPanel({ onJobCreated, onCancel }: JobExtrac
         </form>}
         {error && <p className="form-error" role="alert">{error}</p>}
         {task.status === "confirmed" && <p className="profile-message profile-success" role="status">岗位已保存，原文与字段引用已关联到岗位。</p>}
+        {task.status === "confirmed" && <button className="button button-primary" disabled={saving || !task.job_id} onClick={() => void openSavedJob()} type="button">{saving ? "读取岗位中…" : "查看已保存岗位"}</button>}
         {text && task.status !== "confirmed" && <details className="agent-source-text"><summary>查看提交的招聘原文</summary><pre>{text}</pre></details>}
         {task.status === "confirmed" && <button className="button button-secondary" onClick={startAnother} type="button">新建岗位解析任务</button>}
         {task.status === "succeeded" && <button className="job-quiet-action danger-text" onClick={() => void deleteTask()} type="button">清理此结果并新建任务</button>}
