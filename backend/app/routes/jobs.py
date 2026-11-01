@@ -94,7 +94,7 @@ def _owned_application(session: Session, user: User, job_id: UUID) -> Applicatio
     if application is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="该岗位尚未加入投递看板",
+            detail="该岗位尚无投递记录",
         )
     return application
 
@@ -657,11 +657,13 @@ def update_application(
     session: Annotated[Session, Depends(session_dependency)],
     settings: Annotated[Settings, Depends(settings_dependency)],
 ) -> JobPostingRead:
-    """Update board status, application details, and append status history."""
+    """Save progress directly from a job card, creating tracking when needed."""
 
     enforce_same_origin(request, settings)
     job = _owned_job(session, user, job_id)
-    application = _owned_application(session, user, job.id)
+    application = session.scalar(
+        select(Application).where(Application.job_id == job.id, Application.user_id == user.id)
+    )
     values = payload.model_dump(exclude_unset=True)
     new_status = values.pop("status", None)
     resume_version_id = values.get("resume_version_id")
@@ -674,20 +676,45 @@ def update_application(
         )
         if resume is None:
             raise HTTPException(status_code=404, detail="所选简历版本不存在")
-    for field, value in values.items():
-        setattr(application, field, value)
-    if new_status is not None and new_status != application.status:
-        old_status = application.status
-        application.status = new_status
-        session.add(
-            ApplicationStatusEvent(
+    try:
+        if application is None:
+            application = Application(
                 user_id=user.id,
-                application_id=application.id,
-                from_status=old_status,
-                to_status=new_status,
+                job_id=job.id,
+                status=new_status or "to_research",
+                **values,
             )
-        )
-    session.commit()
+            session.add(application)
+            session.flush()
+            session.add(
+                ApplicationStatusEvent(
+                    user_id=user.id,
+                    application_id=application.id,
+                    from_status=None,
+                    to_status=application.status,
+                )
+            )
+        else:
+            for field, value in values.items():
+                setattr(application, field, value)
+            if new_status is not None and new_status != application.status:
+                old_status = application.status
+                application.status = new_status
+                session.add(
+                    ApplicationStatusEvent(
+                        user_id=user.id,
+                        application_id=application.id,
+                        from_status=old_status,
+                        to_status=new_status,
+                    )
+                )
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="投递记录已发生变化，请刷新后重试。",
+        ) from None
     session.refresh(application)
     company_row = session.get(Company, job.company_id) if job.company_id else None
     return _to_read(job, company_row, application)

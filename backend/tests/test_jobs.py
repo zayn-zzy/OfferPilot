@@ -493,3 +493,81 @@ async def test_csv_import_accepts_gb18030_and_normalized_english_headers(
     assert preview.status_code == 200
     assert preview.json()["ready_count"] == 1
     assert preview.json()["rows"][0]["company_name"] == "中文公司"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("update", "expected_status"),
+    [
+        ({"status": "applied"}, "applied"),
+        ({"notes": "先联系内推人", "next_action": "完善项目描述"}, "to_research"),
+    ],
+)
+async def test_save_progress_directly_on_job_creates_one_tracking_record(
+    client: AsyncClient,
+    update: dict[str, str],
+    expected_status: str,
+) -> None:
+    """Stage and notes can be saved without a separate add-to-board action."""
+
+    await register(client, "direct-progress@example.com")
+    created = await client.post("/api/v1/jobs", json=job_payload())
+    job_id = created.json()["id"]
+    assert created.json()["application"] is None
+
+    first = await client.put(f"/api/v1/jobs/{job_id}/application", json=update)
+    repeated = await client.put(f"/api/v1/jobs/{job_id}/application", json=update)
+    history = await client.get(f"/api/v1/jobs/{job_id}/application/history")
+
+    assert first.status_code == repeated.status_code == 200
+    assert first.json()["application"]["status"] == expected_status
+    assert first.json()["application"]["id"] == repeated.json()["application"]["id"]
+    assert len(history.json()) == 1
+    assert history.json()[0]["from_status"] is None
+    assert history.json()[0]["to_status"] == expected_status
+    for field, value in update.items():
+        assert repeated.json()["application"][field] == value
+
+    changed = await client.put(
+        f"/api/v1/jobs/{job_id}/application", json={"status": "interview"}
+    )
+    updated_history = await client.get(f"/api/v1/jobs/{job_id}/application/history")
+    assert changed.status_code == 200
+    assert len(updated_history.json()) == 2
+    assert updated_history.json()[1]["from_status"] == expected_status
+    assert updated_history.json()[1]["to_status"] == "interview"
+
+
+@pytest.mark.anyio
+async def test_invalid_initial_progress_request_does_not_create_tracking(
+    client: AsyncClient,
+    test_app: FastAPI,
+) -> None:
+    """Initial progress saves still enforce ownership and trusted origins atomically."""
+
+    await register(client, "progress-owner@example.com")
+    created = await client.post("/api/v1/jobs", json=job_payload())
+    job_id = created.json()["id"]
+    async with AsyncClient(
+        transport=ASGITransport(app=test_app), base_url="http://testserver"
+    ) as other:
+        await register(other, "progress-other@example.com")
+        resume = await other.post("/api/v1/resumes/text", json={"text": "他人的简历"})
+        unauthorized_job = await other.put(
+            f"/api/v1/jobs/{job_id}/application", json={"status": "applied"}
+        )
+        assert unauthorized_job.status_code == 404
+
+    invalid_resume = await client.put(
+        f"/api/v1/jobs/{job_id}/application",
+        json={"resume_version_id": resume.json()["id"], "notes": "不得部分保存"},
+    )
+    untrusted_origin = await client.put(
+        f"/api/v1/jobs/{job_id}/application",
+        headers={"Origin": "https://attacker.example"},
+        json={"status": "applied"},
+    )
+    current = await client.get(f"/api/v1/jobs/{job_id}")
+    assert invalid_resume.status_code == 404
+    assert untrusted_origin.status_code == 403
+    assert current.json()["application"] is None

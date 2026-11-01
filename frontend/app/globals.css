@@ -130,6 +130,8 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .jobs-heading { max-width: 1012px; margin: 56px auto 27px; padding: 0 24px; }
 .jobs-heading h1 { font-size: clamp(30px, 4vw, 42px); }
 .jobs-heading > p:last-child { max-width: 700px; color: var(--muted); font-size: 14px; line-height: 1.8; }
+.jobs-heading > p { color: var(--muted); font-size: 14px; }
+.jobs-toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
 .job-form-panel { max-width: 1012px; }
 .csv-import-panel { margin-bottom: 22px; }
 .csv-import-panel > .job-form-hint { margin: 0 0 15px; }
@@ -153,6 +155,13 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .csv-row-invalid { color: #a34949; }
 .csv-preview-actions { margin-top: 13px; }
 .job-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.job-editor fieldset, .application-editor fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.job-field-wide { grid-column: span 2; }
+.job-more-fields summary, .job-description-details summary { color: var(--teal); font-size: 12px; font-weight: 700; cursor: pointer; }
+.job-more-fields > div { margin-top: 16px; }
+.job-description-details { margin-top: 14px; }
+.job-inline-editor { margin-top: 17px; padding-top: 18px; border-top: 1px solid var(--line); }
+.job-card-notice { margin: 12px 0 0; color: var(--teal-dark); font-size: 12px; }
 .job-form label span { color: #8c9a95; font-size: 10px; font-weight: 400; }
 .job-form input, .job-form select, .job-form textarea, .job-filter-form input, .job-filter-form select, .application-fields input, .application-fields textarea, .stage-control select { width: 100%; padding: 10px 12px; border: 1px solid #dce6df; border-radius: 9px; outline: none; color: var(--ink); background: #fcfdfc; font: inherit; font-size: 13px; }
 .job-form input, .job-form select, .job-filter-form input, .job-filter-form select, .application-fields input, .stage-control select { height: 43px; }
@@ -163,9 +172,6 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .job-list-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
 .job-list-heading .eyebrow { margin-bottom: 7px; }
 .job-list-heading h2 { margin: 0; font-size: 24px; letter-spacing: -.03em; }
-.job-view-toggle { display: flex; gap: 5px; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: #ffffffa8; }
-.job-view-toggle button { padding: 8px 12px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
-.job-view-toggle button.active { color: var(--teal-dark); background: white; box-shadow: 0 2px 8px #244b3812; }
 .job-filter-form { margin: 0 0 17px; padding: 15px; display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr 1fr auto; align-items: end; gap: 11px; border: 1px solid var(--line); border-radius: 13px; background: #ffffffd9; }
 .job-filter-form label, .application-fields label, .stage-control { display: grid; gap: 6px; color: var(--ink); font-size: 11px; font-weight: 700; }
 .job-filter-form .button { min-height: 43px; padding: 0 15px; }
@@ -175,13 +181,8 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .job-company { margin: 0 0 5px; color: var(--teal); font-size: 12px; font-weight: 700; }
 .job-card h3 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
 .job-meta { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
-.review-badge { padding: 6px 9px; flex: 0 0 auto; border-radius: 20px; font-size: 10px; font-weight: 700; }
-.review-pending { color: #916b31; background: #fbf3e5; }
-.review-verified { color: #28675b; background: #e8f4ed; }
 .job-facts { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 8px 18px; color: #72847d; font-size: 11px; }
-.job-chip-row { margin-top: 13px; display: flex; flex-wrap: wrap; gap: 6px; }
-.job-chip, .job-tag { padding: 5px 8px; border-radius: 6px; color: #42665b; background: #eff6f1; font-size: 10px; }
-.job-tag { color: #5f718a; background: #f0f3f8; }
+.job-facts a { color: var(--teal); font-weight: 700; }
 .job-description { max-height: 150px; margin: 15px 0 0; overflow: auto; color: #4d625b; font-size: 12px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
 .job-company-note { margin: 12px 0 0; color: #71827b; font-size: 11px; white-space: pre-wrap; }
 .job-links { margin-top: 13px; display: flex; flex-wrap: wrap; gap: 8px 18px; }
@@ -189,7 +190,7 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .job-links a:hover { text-decoration: underline; }
 .job-card-actions { margin-top: 17px; padding-top: 15px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-top: 1px solid #edf1ed; }
 .job-card-actions .button { min-height: 37px; padding: 0 12px; font-size: 11px; }
-.stage-control { min-width: 165px; grid-template-columns: auto minmax(120px, 1fr); align-items: center; margin-right: auto; }
+.stage-control { min-width: 165px; grid-template-columns: auto minmax(120px, 1fr); align-items: center; }
 .stage-control select { height: 37px; padding: 7px 10px; }
 .job-quiet-action { padding: 8px 5px; border: 0; color: var(--teal); background: transparent; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
 .danger-text { color: #a34949; }
@@ -224,12 +225,14 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
   .resume-version-row .status-pill { margin-left: auto; }
   .jobs-heading { margin-top: 42px; }
   .job-form { grid-template-columns: 1fr; }
+  .job-field-wide { grid-column: auto; }
   .job-list-section { margin-top: 35px; padding: 0 14px; }
   .job-list-heading { align-items: flex-start; flex-direction: column; }
   .job-filter-form { grid-template-columns: 1fr 1fr; }
   .job-filter-form label:first-child { grid-column: 1 / -1; }
   .job-filter-form .button { justify-self: start; }
   .job-card { padding: 18px 16px; }
+  .job-card-heading { flex-direction: column; }
   .job-card-actions { align-items: flex-start; }
   .stage-control { width: 100%; margin: 0 0 4px; }
   .application-fields { grid-template-columns: 1fr; }

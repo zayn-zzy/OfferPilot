@@ -1,0 +1,216 @@
+"use client";
+
+import { type FormEvent, useEffect, useState } from "react";
+import {
+  APPLICATION_STAGES,
+  APPLICATION_STAGE_LABELS,
+  type ApplicationStatusEvent,
+  type JobPosting,
+  type JobPostingWrite,
+  type ResumeVersionSummary,
+} from "@/lib/api";
+import JobEditor from "./job-editor";
+
+type JobCardProps = {
+  job: JobPosting;
+  onSave: (job: JobPosting, payload: JobPostingWrite) => Promise<void>;
+  onDelete: (job: JobPosting) => Promise<void>;
+  onUpdateApplication: (job: JobPosting, update: Record<string, unknown>) => Promise<void>;
+  onHistory: (job: JobPosting) => Promise<ApplicationStatusEvent[]>;
+  resumes: ResumeVersionSummary[];
+};
+
+function ApplicationEditor({ job, onUpdateApplication, onHistory, resumes, onSaved }: JobCardProps & { onSaved: () => void }) {
+  const [appliedAt, setAppliedAt] = useState(job.application?.applied_at ?? "");
+  const [notes, setNotes] = useState(job.application?.notes ?? "");
+  const [nextAction, setNextAction] = useState(job.application?.next_action ?? "");
+  const [nextActionDue, setNextActionDue] = useState(job.application?.next_action_due ?? "");
+  const [resumeVersionId, setResumeVersionId] = useState(job.application?.resume_version_id ?? "");
+  const [saving, setSaving] = useState(false);
+  const [history, setHistory] = useState<ApplicationStatusEvent[] | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setHistory(null);
+  }, [job.application?.status]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      await onUpdateApplication(job, {
+        applied_at: appliedAt || null,
+        notes: notes.trim() || null,
+        next_action: nextAction.trim() || null,
+        next_action_due: nextActionDue || null,
+        resume_version_id: resumeVersionId || null,
+      });
+      onSaved();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "投递记录保存失败。");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleHistory() {
+    if (history !== null) {
+      setHistory(null);
+      return;
+    }
+    setHistoryLoading(true);
+    setError("");
+    try {
+      setHistory(await onHistory(job));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "无法读取阶段记录。");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  return (
+    <div className="application-editor">
+      <form aria-label="投递记录" onSubmit={submit}>
+        <fieldset className="application-fields" disabled={saving}>
+          <label>投递日期<input type="date" value={appliedAt} onChange={(event) => setAppliedAt(event.target.value)} /></label>
+          <label>关联简历版本<select value={resumeVersionId} onChange={(event) => setResumeVersionId(event.target.value)}>
+            <option value="">暂不关联</option>
+            {resumes.map((resume) => <option key={resume.id} value={resume.id}>{resume.filename}</option>)}
+          </select></label>
+          <label>下一步日期<input type="date" value={nextActionDue} onChange={(event) => setNextActionDue(event.target.value)} /></label>
+          <label className="application-notes-field">下一步行动<input value={nextAction} maxLength={500} onChange={(event) => setNextAction(event.target.value)} placeholder="例如：完成在线测评" /></label>
+          <label className="application-notes-field">联系人/进展备注<textarea rows={3} maxLength={5000} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+        </fieldset>
+        <div className="application-actions">
+          <button className="button button-primary" disabled={saving} type="submit">{saving ? "保存中…" : "保存投递记录"}</button>
+          {job.application && <button className="button button-secondary" disabled={historyLoading} onClick={() => void toggleHistory()} type="button">{historyLoading ? "读取中…" : history !== null ? "隐藏阶段记录" : "查看阶段记录"}</button>}
+        </div>
+      </form>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {history !== null && <ol className="application-history">
+        {history.map((event) => <li key={event.id}>
+          <strong>{event.from_status ? APPLICATION_STAGE_LABELS[event.from_status] : "开始记录"} → {APPLICATION_STAGE_LABELS[event.to_status]}</strong>
+          <time>{new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(event.created_at))}</time>
+        </li>)}
+        {history.length === 0 && <li>暂无阶段记录</li>}
+      </ol>}
+    </div>
+  );
+}
+
+export default function JobCard(props: JobCardProps) {
+  const { job, onSave, onDelete, onUpdateApplication } = props;
+  const [panel, setPanel] = useState<"edit" | "application" | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const hasDetails = Boolean(
+    job.description || job.company_notes || job.education_requirement || job.industry
+    || job.recruitment_url || job.company_website_url
+    || job.required_skills.length || job.tags.length,
+  );
+
+  function togglePanel(next: "edit" | "application") {
+    setPanel((current) => current === next ? null : next);
+    setError("");
+    setNotice("");
+  }
+
+  async function changeStage(stage: string) {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await onUpdateApplication(job, { status: stage });
+      setNotice("投递阶段已保存。");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "投递阶段保存失败。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!window.confirm(`确定删除“${job.company_name || "未填写公司"} - ${job.title || "未填写职位"}”？投递记录也会删除。`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await onDelete(job);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "删除失败。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <article aria-label={`${job.company_name || "未填写公司"} ${job.title || "未填写职位"}`} className="job-card">
+      <div className="job-card-heading">
+        <div>
+          <p className="job-company">{job.company_name || "未填写公司"}</p>
+          <h3>{job.title || "未填写职位"}</h3>
+          <p className="job-meta">{[job.city, job.job_type, job.batch].filter(Boolean).join(" · ")}</p>
+        </div>
+        <label className="stage-control">
+          投递阶段
+          <select aria-label="投递阶段" disabled={busy} value={job.application?.status ?? "untracked"} onChange={(event) => void changeStage(event.target.value)}>
+            <option disabled value="untracked">未记录</option>
+            {APPLICATION_STAGES.map((stage) => <option key={stage} value={stage}>{APPLICATION_STAGE_LABELS[stage]}</option>)}
+          </select>
+        </label>
+      </div>
+      <div className="job-facts">
+        <span>截止：{job.deadline || "未填写"}</span>
+        {job.source_url && <a href={job.source_url} rel="noreferrer" target="_blank">岗位来源 ↗</a>}
+      </div>
+      {hasDetails && <details className="job-description-details">
+        <summary>岗位详情</summary>
+        {[job.education_requirement, job.industry].filter(Boolean).length > 0 && <p className="job-meta">{[job.education_requirement, job.industry].filter(Boolean).join(" · ")}</p>}
+        {job.required_skills.length > 0 && <p className="job-meta">技能：{job.required_skills.join("、")}</p>}
+        {job.tags.length > 0 && <p className="job-meta">标签：{job.tags.join("、")}</p>}
+        {job.description && <p className="job-description">{job.description}</p>}
+        {job.company_notes && <p className="job-company-note">公司备注：{job.company_notes}</p>}
+        <div className="job-links">
+          {job.recruitment_url && <a href={job.recruitment_url} rel="noreferrer" target="_blank">招聘主页 ↗</a>}
+          {job.company_website_url && <a href={job.company_website_url} rel="noreferrer" target="_blank">公司官网 ↗</a>}
+        </div>
+      </details>}
+      <div className="job-card-actions">
+        <button aria-expanded={panel === "edit"} aria-controls={`job-edit-${job.id}`} className="button button-secondary" disabled={busy} onClick={() => togglePanel("edit")} type="button">{panel === "edit" ? "取消编辑" : "编辑"}</button>
+        <button aria-expanded={panel === "application"} aria-controls={`job-progress-${job.id}`} className="job-quiet-action" disabled={busy} onClick={() => togglePanel("application")} type="button">{panel === "application" ? "收起投递记录" : "投递记录"}</button>
+        <button className="job-quiet-action danger-text" disabled={busy} onClick={() => void remove()} type="button">删除</button>
+      </div>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {notice && <p className="job-card-notice" role="status">{notice}</p>}
+      {busy && <p className="job-card-notice" role="status">正在保存…</p>}
+      {panel === "edit" && <div className="job-inline-editor" id={`job-edit-${job.id}`}>
+        <JobEditor job={job} onCancel={() => setPanel(null)} onSave={async (payload) => {
+          setBusy(true);
+          try {
+            await onSave(job, payload);
+            setPanel(null);
+            setNotice("岗位信息已保存。");
+          } finally {
+            setBusy(false);
+          }
+        }} />
+      </div>}
+      {panel === "application" && <div id={`job-progress-${job.id}`}>
+        <ApplicationEditor {...props} onUpdateApplication={async (selected, update) => {
+          setBusy(true);
+          try {
+            await onUpdateApplication(selected, update);
+          } finally {
+            setBusy(false);
+          }
+        }} onSaved={() => {
+          setPanel(null);
+          setNotice("投递记录已保存。");
+        }} />
+      </div>}
+    </article>
+  );
+}
