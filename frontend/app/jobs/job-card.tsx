@@ -264,7 +264,7 @@ export default function JobCard(props: JobCardProps) {
         <button className="job-quiet-action danger-text" disabled={busy} onClick={() => void remove()} type="button">删除</button>
       </div>
       {researchOpen && <section className="company-research-panel" id={`job-research-${job.id}`} aria-label="公司公开信息研究">
-        <div className="job-match-heading"><h4>公司公开信息研究</h4><span>只读搜索 · Brave Search</span></div>
+        <div className="job-match-heading"><h4>公司公开信息研究</h4><span>只读搜索 · Tavily</span></div>
         {researchLoading && <p className="job-match-disclaimer" role="status">正在搜索公开招聘信息并核验摘要…</p>}
         {researchError && <p className="form-error" role="alert">{researchError}</p>}
         {!researchLoading && !research && <div className="company-research-empty">

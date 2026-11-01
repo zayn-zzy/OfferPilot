@@ -297,5 +297,6 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 - 根据实际可用的 Tavily API Key，将默认搜索 Provider 从 Brave Search 切换为 Tavily Search API。MCP 工具、岗位研究页面、结果缓存、来源链接、引用校验和 AgentRun 持久化逻辑保持不变。
 - 后端通过 `POST https://api.tavily.com/search` 和 Bearer Token 认证，只请求基础网页搜索；将 Tavily 的 `title`、`url`、`content`、`published_date` 归一化为项目统一来源结构。新增无效 Key、额度/频率限制的安全错误提示，Key 不写日志、不发送给浏览器。
 - 新配置项为 `OFFERPILOT_TAVILY_API_KEY`；Compose 将根目录 `.env` 中的配置注入 API 容器。本地 API 从 `backend/.env` 读取。更新 `.env.example` 和 README。没有数据库结构变化。
+- 修正岗位卡片研究面板上的 Provider 名称，避免迁移后仍显示 Brave Search。
 - 搜索适配器及摘要 Provider 定向测试：5 项通过，使用 HTTPX MockTransport 验证 Tavily endpoint、Bearer 认证、请求参数、结果归一化、危险 URL 丢弃、无效 Key 和额度/频率错误映射；没有使用真实 API Key 发起外部请求。Python 编译检查、前端类型检查和 `git diff --check` 通过。
 - 公司研究完整测试文件未能完成：首个 ASGI 集成用例在账户注册请求处等待超过一分钟，尚未进入 Tavily Provider 调用；已中断该次运行。需要在可正常完成注册集成测试的环境补跑回归。
