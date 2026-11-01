@@ -1,12 +1,12 @@
 # OfferPilot
 
-面向秋招求职流程的 Agent 工作台。当前已实现账户认证、个人档案、简历版本管理，以及在统一岗位列表中维护资料和投递进度，后续按 [PRD](秋招求职%20Agent%20产品需求文档.md) 分模块推进。
+面向秋招求职流程的 Agent 工作台。当前已实现账户认证、个人档案、简历版本管理、岗位管理、Agent 岗位抽取、个人资料 RAG 问答和透明的岗位匹配分析，后续按 [PRD](秋招求职%20Agent%20产品需求文档.md) 分模块推进。
 
 ## 技术栈
 
 - 前端：Next.js App Router、React、TypeScript
 - 后端：FastAPI、Pydantic、SQLAlchemy、Alembic
-- 数据：Compose 使用 PostgreSQL 17 和 Redis 7；简历文件使用私有本地存储卷
+- 数据：Compose 使用带 pgvector 扩展的 PostgreSQL 17 和 Redis 7；简历文件使用私有本地存储卷
 - 本地开发：Docker Compose；前端依赖使用 Bun
 
 ## 启动
@@ -23,7 +23,7 @@ docker compose up --build
 - 健康检查：<http://localhost:8000/health>
 - 岗位管理：<http://localhost:3000/jobs>
 
-Compose 会启动 PostgreSQL 17、Redis 7、API 和 Web；PostgreSQL 数据及简历原文件分别保存在命名卷中，首次启动会运行 Alembic 迁移。浏览器通过 Web 同源的 `/api` 路径访问后端，再由 Next.js 服务转发到 API 容器，因此不依赖浏览器能否直接访问后端端口。账户密码使用 Argon2id 哈希；登录状态通过 HttpOnly Cookie 维护。开发环境未设置密钥时使用临时随机密钥，重启后现有会话会失效；部署环境必须设置 `OFFERPILOT_SECRET_KEY`。
+Compose 会启动 PostgreSQL 17（含 pgvector）、Redis 7、API 和 Web；PostgreSQL 数据及简历原文件分别保存在命名卷中，首次启动会运行 Alembic 迁移。浏览器通过 Web 同源的 `/api` 路径访问后端，再由 Next.js 服务转发到 API 容器，因此不依赖浏览器能否直接访问后端端口。账户密码使用 Argon2id 哈希；登录状态通过 HttpOnly Cookie 维护。开发环境未设置密钥时使用临时随机密钥，重启后现有会话会失效；部署环境必须设置 `OFFERPILOT_SECRET_KEY`。
 
 没有 Docker 时，也可以直接启动 API 和 Web。API 默认使用 `backend/offerpilot.db` SQLite 数据库，并将上传文件写入 `backend/storage/`；无需安装 PostgreSQL 或 Redis。Next.js 默认将 `/api` 转发到 `http://127.0.0.1:8000`；若 API 位于其他地址，启动 Web 前设置服务端环境变量 `OFFERPILOT_API_URL`。若要改用本机 PostgreSQL，可设置 `OFFERPILOT_DATABASE_URL` 后再运行迁移。当前岗位管理也不依赖 Redis。
 
@@ -57,6 +57,22 @@ bun run dev
 复制 `.env.example` 到仓库根目录 `.env` 并配置 `OFFERPILOT_LLM_BASE_URL`、`OFFERPILOT_LLM_API_KEY` 与 `OFFERPILOT_LLM_MODEL`，Compose API 会读取这些变量。直接本地启动 API 时，把相同变量放在 `backend/.env`。支持以 `/v1` 结尾的 API 根地址，或直接提供 `/v1/chat/completions` 地址。密钥只在 API 进程内读取，不通过设置接口或任务响应返回。未配置时任务会显示明确失败原因，配置完成后可重试。
 
 提取任务会将状态、进度事件、尝试次数、模型名和安全错误摘要保存在数据库中；前端通过 SSE 读取实时进度，也会从任务 API 恢复状态。失败任务最多尝试 3 次；进程重启导致的排队/运行中任务会转为失败并可重试。当前阶段使用 FastAPI 进程内后台任务；第 6 步引入 Celery/Redis 后再将执行迁移到持久化队列。这个抽取过程没有浏览器抓取工具，也不执行外部写操作。
+
+### 第 4 步：个人资料 RAG 与岗位匹配
+
+在“岗位管理”卡片中点击“匹配分析”，系统将岗位学历要求与个人档案学历比较，将岗位城市/职位/行业与已保存偏好比较，并检查岗位要求技能是否在最新一份已确认简历或技能档案中出现。每项显示“符合 / 不符合 / 待确认”；“未找到”只表示资料中没有写出，不代表用户不具备。此规则分析不生成录用概率。
+
+“资料问答”页允许添加项目/求职笔记，并检索已确认的简历与笔记回答问题。点击“建立 / 更新索引”后，资料按 900 字符片段（有重叠）切分并生成向量；问题检索当前账户的相似片段，模型只能依据这些片段作答。系统只保留模型引用中确实出现在检索片段里的原文；没有支持性引用时返回无证据结果。简历删除、笔记编辑/删除会同步删除相关索引片段；新资料需重新建立索引。
+
+向量生成使用独立的 OpenAI 兼容 Embeddings API，返回维度固定为 1536；问答复用已配置的 Chat Completions API。需要在仓库根 `.env`（Compose）或 `backend/.env`（本地 API）设置：
+
+```dotenv
+OFFERPILOT_EMBEDDING_BASE_URL=https://your-provider.example/v1
+OFFERPILOT_EMBEDDING_API_KEY=your-embedding-key
+OFFERPILOT_EMBEDDING_MODEL=your-1536-dimension-embedding-model
+```
+
+向量接口必须兼容 `POST /embeddings`。本地 SQLite 将向量保存在 JSON 列并在应用中计算余弦相似度；Compose PostgreSQL 使用 pgvector 的 `vector(1536)` 列、余弦近邻查询和 HNSW 索引。升级数据库后才可使用新增接口。已有简历不需要重新上传，但须先确认，然后进入 `/knowledge` 建立索引。
 
 ## 后端开发与测试
 
@@ -108,4 +124,8 @@ uv run scripts/check_agent_job_visibility.py
 - `POST /api/v1/agent/job-extractions`：创建岗位原文抽取任务；`GET /api/v1/agent/tasks`、`GET /api/v1/agent/tasks/{id}` 查询当前用户的任务。
 - `GET /api/v1/agent/tasks/{id}/events`：SSE 进度流；`POST /api/v1/agent/tasks/{id}/retry` 重试失败任务；`GET /api/v1/agent/tasks/{id}/source` 读取待确认原文。
 - `DELETE /api/v1/agent/tasks/{id}`：删除未确认的失败/成功任务及其暂存原文；已确认任务需删除关联岗位。
+- `GET /api/v1/jobs/{id}/match`：根据当前档案、最新已确认简历和岗位信息返回透明的条件/技能比对，不保存派生分数。
+- `GET/POST /api/v1/knowledge/notes`、`PUT/DELETE /api/v1/knowledge/notes/{id}`：管理当前用户的求职笔记。
+- `POST /api/v1/knowledge/reindex`：重建当前用户已确认简历与笔记的向量索引。
+- `POST /api/v1/knowledge/ask`：从当前用户已索引的资料中检索片段并返回带原文引用的回答。
 - `POST /api/v1/agent/tasks/{id}/confirm`：应用用户核对后的字段并保存岗位；`GET /api/v1/agent/jobs/{job_id}/evidence` 查看来源原文和字段引用。

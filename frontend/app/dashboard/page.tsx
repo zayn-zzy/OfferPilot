@@ -31,6 +31,7 @@ export default function DashboardPage() {
         </Link>
         <div className="dashboard-actions">
           <Link className="text-link" href="/profile">个人档案</Link>
+          <Link className="text-link" href="/knowledge">资料问答</Link>
           <Link className="text-link" href="/jobs">岗位管理</Link>
           <button className="text-button" onClick={logout} type="button">退出登录</button>
         </div>
@@ -38,7 +39,7 @@ export default function DashboardPage() {
       <section className="dashboard-welcome">
         <p className="eyebrow">求职工作台</p>
         <h1>{user ? `你好，${user.email}` : error ? requiresLogin ? "请重新登录" : "暂时无法载入工作区" : "正在载入你的工作区…"}</h1>
-        <p>{error || "管理个人档案、记录招聘岗位和投递进度。"}</p>
+        <p>{error || "管理个人档案、查询简历笔记并记录岗位进度。"}</p>
       </section>
       <section className="setup-panel">
         <div className="setup-icon">01</div>

@@ -7,11 +7,11 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.models import ResumeVersion, User
+from app.models import DocumentChunk, ResumeVersion, User
 from app.routes.auth import (
     current_user_dependency,
     enforce_same_origin,
@@ -241,6 +241,13 @@ def delete_resume(
 
     enforce_same_origin(request, settings)
     resume = _owned_resume(session, user, resume_id)
+    session.execute(
+        delete(DocumentChunk).where(
+            DocumentChunk.user_id == user.id,
+            DocumentChunk.source_type == "resume",
+            DocumentChunk.source_id == resume.id,
+        )
+    )
     if resume.storage_key:
         storage_root = settings.storage_dir.resolve()
         file_path = (storage_root / resume.storage_key).resolve()

@@ -135,6 +135,50 @@ export type ResumeVersionSummary = {
   extracted_char_count: number;
 };
 
+export type KnowledgeNote = {
+  id: string;
+  title: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type KnowledgeAnswer = {
+  answer: string;
+  citations: {
+    chunk_id: string;
+    source_type: "resume" | "note";
+    source_id: string;
+    source_name: string;
+    quote: string;
+    relevance: number;
+  }[];
+  no_evidence: boolean;
+};
+
+export type KnowledgeReindex = {
+  indexed_documents: number;
+  indexed_chunks: number;
+  embedding_model: string;
+};
+
+export type JobMatch = {
+  job_id: string;
+  resume_id: string;
+  resume_filename: string;
+  criteria: {
+    key: string;
+    label: string;
+    category: "hard_requirement" | "preference";
+    status: "meets" | "does_not_meet" | "unknown";
+    requirement: string | null;
+    candidate_value: string | null;
+    explanation: string;
+  }[];
+  skills: { skill: string; status: "evidenced" | "not_found"; evidence: string | null }[];
+  disclaimer: string;
+};
+
 export type ExtractedJobField = {
   value: string | string[] | null;
   confidence: number;

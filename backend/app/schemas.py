@@ -430,3 +430,87 @@ class JobSourceEvidenceRead(BaseModel):
     source_text: str
     field_evidence: dict
     captured_at: datetime
+
+
+class KnowledgeNoteWrite(BaseModel):
+    """User-authored source material for private retrieval."""
+
+    title: str = Field(min_length=1, max_length=200)
+    content: str = Field(min_length=20, max_length=50_000)
+
+    @field_validator("title", "content")
+    @classmethod
+    def trim_required_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("内容不能为空")
+        return normalized
+
+
+class KnowledgeNoteRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    title: str
+    content: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class KnowledgeReindexRead(BaseModel):
+    indexed_documents: int
+    indexed_chunks: int
+    embedding_model: str
+
+
+class KnowledgeAsk(BaseModel):
+    question: str = Field(min_length=3, max_length=2000)
+    top_k: int = Field(default=5, ge=1, le=10)
+
+    @field_validator("question")
+    @classmethod
+    def trim_question(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 3:
+            raise ValueError("问题至少需要 3 个字符")
+        return normalized
+
+
+class KnowledgeCitationRead(BaseModel):
+    chunk_id: UUID
+    source_type: Literal["resume", "note"]
+    source_id: UUID
+    source_name: str
+    quote: str
+    relevance: float
+
+
+class KnowledgeAnswerRead(BaseModel):
+    answer: str
+    citations: list[KnowledgeCitationRead]
+    no_evidence: bool
+
+
+class MatchCriterionRead(BaseModel):
+    key: str
+    label: str
+    category: Literal["hard_requirement", "preference"]
+    status: Literal["meets", "does_not_meet", "unknown"]
+    requirement: str | None
+    candidate_value: str | None
+    explanation: str
+
+
+class MatchSkillRead(BaseModel):
+    skill: str
+    status: Literal["evidenced", "not_found"]
+    evidence: str | None
+
+
+class JobMatchRead(BaseModel):
+    job_id: UUID
+    resume_id: UUID
+    resume_filename: str
+    criteria: list[MatchCriterionRead]
+    skills: list[MatchSkillRead]
+    disclaimer: str

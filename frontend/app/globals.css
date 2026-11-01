@@ -242,6 +242,45 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .job-empty-state strong { color: var(--ink); font-size: 14px; }
 .job-empty-state span { font-size: 12px; }
 
+.knowledge-shell { min-height: 100vh; padding-bottom: 70px; background: radial-gradient(ellipse at 50% 0, #e4f2e9 0, var(--canvas) 38%); }
+.knowledge-hint, .knowledge-index-summary { color: var(--muted); font-size: 12px; line-height: 1.8; }
+.knowledge-index-summary { padding: 10px 12px; border-radius: 9px; color: #28675b; background: #e8f4ed; }
+.knowledge-note-form, .knowledge-ask-form { margin-top: 22px; display: grid; gap: 11px; }
+.knowledge-note-form label, .knowledge-ask-form label { display: grid; gap: 7px; font-size: 12px; font-weight: 700; }
+.knowledge-note-form input, .knowledge-note-form textarea, .knowledge-ask-form textarea { width: 100%; padding: 11px 12px; border: 1px solid #dce6df; border-radius: 9px; outline: none; color: var(--ink); background: #fcfdfc; font: inherit; font-size: 13px; resize: vertical; }
+.knowledge-note-form input { height: 43px; }
+.knowledge-note-form input:focus, .knowledge-note-form textarea:focus, .knowledge-ask-form textarea:focus { border-color: #76aa9b; box-shadow: 0 0 0 3px #26786e14; }
+.knowledge-note-form .button, .knowledge-ask-form .button { justify-self: start; }
+.knowledge-note-list { margin-top: 20px; }
+.knowledge-note { padding: 15px 0; display: flex; align-items: flex-start; gap: 16px; border-top: 1px solid #edf1ed; }
+.knowledge-note > div { min-width: 0; flex: 1; }
+.knowledge-note h3, .knowledge-answer h3 { margin: 0 0 8px; font-size: 14px; }
+.knowledge-note p, .knowledge-answer > p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.knowledge-note .job-quiet-action { flex: 0 0 auto; }
+.knowledge-answer { margin-top: 23px; padding: 18px; border: 1px solid #dfe9e1; border-radius: 12px; background: #fbfdfb; }
+.knowledge-citations { margin-top: 17px; }
+.knowledge-citations h4 { margin: 0 0 9px; font-size: 12px; }
+.knowledge-citations blockquote { margin: 8px 0 0; padding: 12px; display: grid; gap: 7px; border-left: 3px solid #76aa9b; border-radius: 0 8px 8px 0; color: var(--muted); background: white; font-size: 12px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.knowledge-citations blockquote strong { color: var(--ink); }
+.job-match-analysis { margin-top: 14px; padding: 16px; border: 1px solid #dfe9e1; border-radius: 11px; background: #fbfdfb; }
+.job-match-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.job-match-heading h4, .job-match-skills h5 { margin: 0; font-size: 13px; }
+.job-match-heading span, .job-match-criteria small, .job-match-disclaimer { color: var(--muted); font-size: 11px; line-height: 1.7; }
+.job-match-criteria, .job-match-skills ul { margin: 12px 0 0; padding: 0; list-style: none; }
+.job-match-criteria li { padding: 10px 0; display: flex; align-items: flex-start; gap: 10px; border-top: 1px solid #edf1ed; }
+.job-match-status { min-width: 52px; margin-top: 1px; padding: 4px 6px; border-radius: 5px; text-align: center; font-size: 10px; font-weight: 700; }
+.job-match-meets { color: #28675b; background: #e8f4ed; }
+.job-match-does_not_meet { color: #983c3c; background: #fff0ed; }
+.job-match-unknown { color: #936927; background: #fbf3e5; }
+.job-match-criteria li > div { display: grid; gap: 3px; }
+.job-match-criteria strong, .job-match-skills li { font-size: 11px; }
+.job-match-criteria p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.job-match-skills { margin-top: 9px; padding-top: 12px; border-top: 1px solid #edf1ed; }
+.job-match-skills li { padding: 8px 0; border-bottom: 1px solid #edf1ed; }
+.job-match-skills li > strong { color: var(--teal); }
+.job-match-skills blockquote { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.job-match-disclaimer { margin: 12px 0 0; }
+
 @media (max-width: 600px) {
   .topbar, .dashboard-topbar { height: 68px; padding: 0 20px; }
   .hero { margin-top: 61px; }

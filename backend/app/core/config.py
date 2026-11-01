@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="", max_length=120)
     llm_timeout_seconds: float = Field(default=30.0, gt=0, le=180)
     llm_low_confidence_threshold: float = Field(default=0.75, ge=0, le=1)
+    embedding_base_url: str = ""
+    embedding_api_key: SecretStr = SecretStr("")
+    embedding_model: str = Field(default="", max_length=120)
 
 
 @lru_cache

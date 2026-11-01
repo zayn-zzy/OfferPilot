@@ -5,6 +5,7 @@ import {
   APPLICATION_STAGES,
   APPLICATION_STAGE_LABELS,
   type ApplicationStatusEvent,
+  type JobMatch,
   type JobPosting,
   type JobSourceEvidence,
   type JobPostingWrite,
@@ -113,6 +114,8 @@ export default function JobCard(props: JobCardProps) {
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const [evidenceError, setEvidenceError] = useState("");
+  const [matchAnalysis, setMatchAnalysis] = useState<JobMatch | null>(null);
+  const [matchLoading, setMatchLoading] = useState(false);
   const hasDetails = Boolean(
     job.description || job.company_notes || job.education_requirement || job.industry
     || job.recruitment_url || job.company_website_url
@@ -169,6 +172,18 @@ export default function JobCard(props: JobCardProps) {
     }
   }
 
+  async function analyzeMatch() {
+    setMatchLoading(true);
+    setError("");
+    try {
+      setMatchAnalysis(await apiRequest<JobMatch>(`/api/v1/jobs/${job.id}/match`));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "岗位匹配分析失败。");
+    } finally {
+      setMatchLoading(false);
+    }
+  }
+
   return (
     <article aria-label={`${job.company_name || "未填写公司"} ${job.title || "未填写职位"}`} className="job-card" id={`job-${job.id}`} tabIndex={-1}>
       <div className="job-card-heading">
@@ -205,8 +220,23 @@ export default function JobCard(props: JobCardProps) {
         <button aria-expanded={panel === "edit"} aria-controls={`job-edit-${job.id}`} className="button button-secondary" disabled={busy} onClick={() => togglePanel("edit")} type="button">{panel === "edit" ? "取消编辑" : "编辑"}</button>
         <button aria-expanded={panel === "application"} aria-controls={`job-progress-${job.id}`} className="job-quiet-action" disabled={busy} onClick={() => togglePanel("application")} type="button">{panel === "application" ? "收起投递记录" : "投递记录"}</button>
         {job.source_type === "agent" && <button aria-expanded={evidenceOpen} className="job-quiet-action" disabled={evidenceLoading} onClick={() => void toggleEvidence()} type="button">{evidenceLoading ? "读取依据中…" : evidenceOpen ? "收起抽取依据" : "抽取依据"}</button>}
+        <button aria-expanded={Boolean(matchAnalysis)} className="job-quiet-action" disabled={matchLoading} onClick={() => void analyzeMatch()} type="button">{matchLoading ? "分析中…" : matchAnalysis ? "重新分析匹配" : "匹配分析"}</button>
         <button className="job-quiet-action danger-text" disabled={busy} onClick={() => void remove()} type="button">删除</button>
       </div>
+      {matchAnalysis && <section className="job-match-analysis" aria-label="岗位匹配分析">
+        <div className="job-match-heading"><h4>匹配分析</h4><span>依据：{matchAnalysis.resume_filename}</span></div>
+        <ul className="job-match-criteria">{matchAnalysis.criteria.map((criterion) => <li key={criterion.key}>
+          <span className={`job-match-status job-match-${criterion.status}`}>{criterion.status === "meets" ? "符合" : criterion.status === "does_not_meet" ? "不符合" : "待确认"}</span>
+          <div><strong>{criterion.label}{criterion.category === "hard_requirement" ? " · 硬性要求" : " · 偏好"}</strong><p>{criterion.explanation}</p>
+            {(criterion.requirement || criterion.candidate_value) && <small>岗位：{criterion.requirement || "未填写"} · 你的档案：{criterion.candidate_value || "未填写"}</small>}
+          </div>
+        </li>)}</ul>
+        {matchAnalysis.skills.length > 0 && <div className="job-match-skills"><h5>岗位技能要求</h5><ul>{matchAnalysis.skills.map((skill) => <li key={skill.skill}>
+          <strong>{skill.status === "evidenced" ? "简历/档案有记录" : "资料中未找到"}</strong> {skill.skill}
+          {skill.evidence && <blockquote>{skill.evidence}</blockquote>}
+        </li>)}</ul></div>}
+        <p className="job-match-disclaimer">{matchAnalysis.disclaimer}</p>
+      </section>}
       {evidenceError && <p className="form-error" role="alert">{evidenceError}</p>}
       {evidenceOpen && sourceEvidence && <section className="job-source-evidence" aria-label="岗位字段抽取依据">
         <h4>字段来源依据</h4>

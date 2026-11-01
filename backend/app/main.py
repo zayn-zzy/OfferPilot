@@ -24,12 +24,20 @@ from app.models import AgentRun, Base, utc_now
 from app.routes.agent import router as agent_router
 from app.routes.auth import router as auth_router
 from app.routes.jobs import router as jobs_router
+from app.routes.knowledge import router as knowledge_router
+from app.routes.matching import router as matching_router
 from app.routes.profile import router as profile_router
 from app.routes.resumes import router as resumes_router
 from app.schemas import HealthRead
 from app.services.job_extraction import (
     JobExtractionProvider,
     OpenAICompatibleJobExtractionProvider,
+)
+from app.services.knowledge import (
+    EmbeddingProvider,
+    KnowledgeAnswerProvider,
+    OpenAICompatibleEmbeddingProvider,
+    OpenAICompatibleKnowledgeAnswerProvider,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,6 +56,8 @@ def create_app(
     settings: Settings | None = None,
     session_factory: sessionmaker[Session] | None = None,
     job_extraction_provider: JobExtractionProvider | None = None,
+    embedding_provider: EmbeddingProvider | None = None,
+    knowledge_answer_provider: KnowledgeAnswerProvider | None = None,
 ) -> FastAPI:
     """Create an app instance, optionally injecting test settings and a database."""
 
@@ -99,6 +109,10 @@ def create_app(
     app.state.job_extraction_provider = (
         job_extraction_provider or OpenAICompatibleJobExtractionProvider()
     )
+    app.state.embedding_provider = embedding_provider or OpenAICompatibleEmbeddingProvider()
+    app.state.knowledge_answer_provider = (
+        knowledge_answer_provider or OpenAICompatibleKnowledgeAnswerProvider()
+    )
 
     @app.exception_handler(DBAPIError)
     async def handle_database_error(request: Request, error: DBAPIError) -> JSONResponse:
@@ -131,6 +145,8 @@ def create_app(
     app.include_router(profile_router, prefix="/api/v1")
     app.include_router(resumes_router, prefix="/api/v1")
     app.include_router(agent_router, prefix="/api/v1")
+    app.include_router(knowledge_router, prefix="/api/v1")
+    app.include_router(matching_router, prefix="/api/v1")
 
     @app.get("/health", response_model=HealthRead, tags=["system"])
     def health(
