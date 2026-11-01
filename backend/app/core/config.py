@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     embedding_model: str = Field(default="", max_length=120)
     tavily_api_key: SecretStr = SecretStr("")
     research_timeout_seconds: float = Field(default=12.0, gt=0, le=60)
+    celery_broker_url: str = "redis://localhost:6379/0"
 
 
 @lru_cache

@@ -1,8 +1,11 @@
 export type User = {
   id: string;
   email: string;
+  timezone: string;
   created_at: string;
 };
+
+export type UserTimezoneUpdate = { user: User; recalculated_reminders: number };
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number | null) {
@@ -198,6 +201,44 @@ export type CompanyResearch = {
   }[];
   no_evidence: boolean;
   warning: string | null;
+};
+
+export type ReminderKind = "opening" | "deadline" | "assessment" | "interview" | "follow_up" | "other";
+export type ReminderStatus = "scheduled" | "paused" | "notified" | "completed" | "cancelled" | "failed";
+
+export type Reminder = {
+  id: string;
+  job_id: string | null;
+  job_label: string | null;
+  title: string;
+  details: string | null;
+  kind: ReminderKind;
+  event_at: string;
+  notify_at: string;
+  timezone: string;
+  lead_minutes: number;
+  channel: "in_app";
+  status: ReminderStatus;
+  schedule_revision: number;
+  delivery_attempts: number;
+  last_delivery_error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ReminderNotification = {
+  id: string;
+  reminder_id: string;
+  title: string;
+  body: string;
+  created_at: string;
+  read_at: string | null;
+};
+
+export type ReminderCenter = {
+  reminders: Reminder[];
+  notifications: ReminderNotification[];
+  unread_count: number;
 };
 
 export type ExtractedJobField = {

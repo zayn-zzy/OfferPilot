@@ -84,8 +84,16 @@ async def test_upgrade_existing_profile_database_preserves_data_and_enables_jobs
 
             command.upgrade(migration_config, "head")
             assert {
-                "companies", "job_postings", "applications", "application_status_events"
+                "companies",
+                "job_postings",
+                "applications",
+                "application_status_events",
+                "reminders",
+                "notifications",
             }.issubset(inspect(engine).get_table_names())
+            assert "timezone" in {
+                column["name"] for column in inspect(engine).get_columns("users")
+            }
             with engine.connect() as connection:
                 assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
                     ScriptDirectory.from_config(migration_config).get_current_head()

@@ -39,6 +39,7 @@ services:
       OFFERPILOT_EMBEDDING_MODEL: ${OFFERPILOT_EMBEDDING_MODEL:-}
       OFFERPILOT_TAVILY_API_KEY: ${OFFERPILOT_TAVILY_API_KEY:-}
       OFFERPILOT_RESEARCH_TIMEOUT_SECONDS: ${OFFERPILOT_RESEARCH_TIMEOUT_SECONDS:-12}
+      OFFERPILOT_CELERY_BROKER_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
     depends_on:
@@ -46,9 +47,42 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     volumes:
       - resume_storage:/app/storage
     command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+
+  worker:
+    build:
+      context: ./backend
+    environment:
+      OFFERPILOT_ENVIRONMENT: ${OFFERPILOT_ENVIRONMENT:-development}
+      OFFERPILOT_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-offerpilot}:${POSTGRES_PASSWORD:-offerpilot_dev}@db:5432/${POSTGRES_DB:-offerpilot}
+      OFFERPILOT_CELERY_BROKER_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    command: ["celery", "-A", "app.celery_app:celery_app", "worker", "--loglevel=INFO"]
+
+  beat:
+    build:
+      context: ./backend
+    environment:
+      OFFERPILOT_ENVIRONMENT: ${OFFERPILOT_ENVIRONMENT:-development}
+      OFFERPILOT_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-offerpilot}:${POSTGRES_PASSWORD:-offerpilot_dev}@db:5432/${POSTGRES_DB:-offerpilot}
+      OFFERPILOT_CELERY_BROKER_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "app.celery_app:celery_app", "beat", "--loglevel=INFO", "--schedule=/tmp/celerybeat-schedule"]
 
   web:
     image: oven/bun:1

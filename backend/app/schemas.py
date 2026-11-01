@@ -4,6 +4,7 @@ from datetime import date, datetime
 from typing import Literal
 from urllib.parse import urlsplit
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
     BaseModel,
@@ -66,7 +67,28 @@ class UserRead(BaseModel):
 
     id: UUID
     email: EmailStr
+    timezone: str
     created_at: datetime
+
+
+class UserTimezoneWrite(BaseModel):
+    timezone: str = Field(min_length=1, max_length=64)
+    recalculate_future: Literal[True]
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        normalized = value.strip()
+        try:
+            ZoneInfo(normalized)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("请提供有效的 IANA 时区，例如 Asia/Shanghai") from exc
+        return normalized
+
+
+class UserTimezoneUpdateRead(BaseModel):
+    user: UserRead
+    recalculated_reminders: int
 
 
 class HealthRead(BaseModel):
@@ -543,3 +565,95 @@ class CompanyResearchRead(BaseModel):
     sources: list[CompanyResearchSourceRead]
     no_evidence: bool
     warning: str | None = None
+
+
+ReminderKind = Literal["opening", "deadline", "assessment", "interview", "follow_up", "other"]
+ReminderStatus = Literal["scheduled", "paused", "notified", "completed", "cancelled", "failed"]
+
+
+class ReminderCreate(BaseModel):
+    """User-confirmed reminder content and schedule."""
+
+    job_id: UUID | None = None
+    title: str = Field(min_length=1, max_length=200)
+    details: str | None = Field(default=None, max_length=2000)
+    kind: ReminderKind = "other"
+    event_at: datetime
+    timezone: str = Field(min_length=1, max_length=64)
+    lead_minutes: int = Field(default=0, ge=0, le=10_080)
+    channel: Literal["in_app"] = "in_app"
+    idempotency_key: str = Field(min_length=16, max_length=128)
+
+    @field_validator("title")
+    @classmethod
+    def trim_title(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("提醒标题不能为空")
+        return normalized
+
+    @field_validator("details")
+    @classmethod
+    def trim_details(cls, value: str | None) -> str | None:
+        normalized = value.strip() if value else ""
+        return normalized or None
+
+    @field_validator("event_at")
+    @classmethod
+    def require_aware_event_time(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("事件时间必须包含时区偏移")
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        normalized = value.strip()
+        try:
+            ZoneInfo(normalized)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("请提供有效的 IANA 时区，例如 Asia/Shanghai") from exc
+        return normalized
+
+
+class ReminderSnooze(BaseModel):
+    """Supported quick postponement periods."""
+
+    delay_minutes: Literal[60, 1440, 10080]
+
+
+class ReminderRead(BaseModel):
+    id: UUID
+    job_id: UUID | None
+    job_label: str | None
+    title: str
+    details: str | None
+    kind: ReminderKind
+    event_at: datetime
+    notify_at: datetime
+    timezone: str
+    lead_minutes: int
+    channel: Literal["in_app"]
+    status: ReminderStatus
+    schedule_revision: int
+    delivery_attempts: int
+    last_delivery_error: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class NotificationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    reminder_id: UUID
+    title: str
+    body: str
+    created_at: datetime
+    read_at: datetime | None
+
+
+class ReminderCenterRead(BaseModel):
+    reminders: list[ReminderRead]
+    notifications: list[NotificationRead]
+    unread_count: int

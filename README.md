@@ -80,6 +80,12 @@ OFFERPILOT_EMBEDDING_MODEL=your-embedding-model
 
 在仓库根 `.env`（Compose）或 `backend/.env`（本地 API）配置 `OFFERPILOT_TAVILY_API_KEY`。密钥仅由后端读取，不要提交 `.env` 或把 Key 放到前端；没有密钥时公司研究会提示配置问题，其他模块仍可使用。公开搜索片段会发送给已配置的 Chat Completions 服务生成摘要。Tavily 使用 Bearer Token 认证，搜索请求发送至 `https://api.tavily.com/search`；参见 [Tavily Search API 说明](https://help.tavily.com/articles/4840311948-tavily-search-api)。
 
+### 提醒中心与后台任务
+
+提醒中心支持开放日、截止时间、测评、面试、跟进和自定义提醒。创建时可选关联岗位、事件时区和提前时间；MVP 只提供站内通知。通知计划由数据库中的提醒记录决定，Celery Beat 每分钟触发一次扫描，Celery Worker 将到期提醒原子地变成通知记录。数据库幂等键以“提醒 ID + 排期版本”唯一约束防止重复通知；延期会更新触发时间并增加排期版本，完成/取消后不再投递。数据库错误会由 Celery 指数退避重试，最多 5 次。
+
+Docker Compose 会启动 Redis、Worker 和 Beat。无 Docker 本地运行需自行启动 Redis，再从 `backend` 目录分别运行 `uv run celery -A app.celery_app:celery_app worker --loglevel=INFO` 和 `uv run celery -A app.celery_app:celery_app beat --loglevel=INFO --schedule=/tmp/offerpilot-celerybeat-schedule`；仅启动 FastAPI 不会触发定时通知。使用 `OFFERPILOT_CELERY_BROKER_URL` 指定 Redis Broker。
+
 项目也通过官方 MCP Python SDK 暴露只读 `search_company_recruitment` 工具。MCP 客户端可在后端目录启动本地 stdio 服务：
 
 ```bash
@@ -130,6 +136,7 @@ uv run scripts/check_agent_job_visibility.py
 - `POST /api/v1/auth/login`：登录。
 - `POST /api/v1/auth/logout`：退出并清理会话。
 - `GET /api/v1/auth/me`：获取当前账户。
+- `PUT /api/v1/auth/me/timezone`：更新账户 IANA 时区；必须显式确认重新计算所有未来提醒。
 - `GET/PUT /api/v1/profile`：读取或保存当前用户的求职档案。
 - `GET /api/v1/resumes`、`POST /api/v1/resumes/upload`、`POST /api/v1/resumes/text`：列出、上传或粘贴简历版本。
 - `GET /api/v1/resumes/{id}`、`POST /api/v1/resumes/{id}/confirm`、`DELETE /api/v1/resumes/{id}`：预览、确认或删除当前用户的简历版本。
@@ -144,4 +151,7 @@ uv run scripts/check_agent_job_visibility.py
 - `GET/POST /api/v1/knowledge/notes`、`PUT/DELETE /api/v1/knowledge/notes/{id}`：管理当前用户的求职笔记。
 - `POST /api/v1/knowledge/reindex`：重建当前用户已确认简历与笔记的向量索引。
 - `POST /api/v1/knowledge/ask`：从当前用户已索引的资料中检索片段并返回带原文引用的回答。
+- `GET/POST /api/v1/reminders`：读取提醒中心或创建岗位开放、截止、测评、面试及跟进提醒；创建请求支持幂等键。
+- `POST /api/v1/reminders/{id}/complete`、`/cancel`、`/pause`、`/resume`、`/snooze`、`/retry`：完成、取消、暂停/恢复、延期或重试提醒。
+- `POST /api/v1/notifications/{id}/read`：将当前用户的站内通知标为已读。
 - `POST /api/v1/agent/tasks/{id}/confirm`：应用用户核对后的字段并保存岗位；`GET /api/v1/agent/jobs/{job_id}/evidence` 查看来源原文和字段引用。

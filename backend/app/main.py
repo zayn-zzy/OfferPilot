@@ -28,6 +28,8 @@ from app.routes.knowledge import router as knowledge_router
 from app.routes.matching import router as matching_router
 from app.routes.profile import router as profile_router
 from app.routes.research import router as research_router
+from app.routes.reminders import router as reminders_router
+from app.routes.reminders import notifications_router
 from app.routes.resumes import router as resumes_router
 from app.schemas import HealthRead
 from app.services.job_extraction import (
@@ -166,6 +168,8 @@ def create_app(
     app.include_router(knowledge_router, prefix="/api/v1")
     app.include_router(matching_router, prefix="/api/v1")
     app.include_router(research_router, prefix="/api/v1")
+    app.include_router(reminders_router, prefix="/api/v1")
+    app.include_router(notifications_router, prefix="/api/v1")
 
     @app.get("/health", response_model=HealthRead, tags=["system"])
     def health(
