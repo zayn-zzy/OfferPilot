@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     session_cookie_name: str = "offerpilot_session"
     session_ttl_minutes: int = 60
     storage_dir: Path = Path("storage")
+    llm_base_url: str = ""
+    llm_api_key: SecretStr = SecretStr("")
+    llm_model: str = Field(default="", max_length=120)
+    llm_timeout_seconds: float = Field(default=30.0, gt=0, le=180)
+    llm_low_confidence_threshold: float = Field(default=0.75, ge=0, le=1)
 
 
 @lru_cache

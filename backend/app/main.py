@@ -20,12 +20,17 @@ from app.db import (
     is_missing_schema_error,
     session_dependency,
 )
-from app.models import Base
+from app.models import AgentRun, Base, utc_now
+from app.routes.agent import router as agent_router
 from app.routes.auth import router as auth_router
 from app.routes.jobs import router as jobs_router
 from app.routes.profile import router as profile_router
 from app.routes.resumes import router as resumes_router
 from app.schemas import HealthRead
+from app.services.job_extraction import (
+    JobExtractionProvider,
+    OpenAICompatibleJobExtractionProvider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +47,7 @@ def _schema_outdated_response() -> JSONResponse:
 def create_app(
     settings: Settings | None = None,
     session_factory: sessionmaker[Session] | None = None,
+    job_extraction_provider: JobExtractionProvider | None = None,
 ) -> FastAPI:
     """Create an app instance, optionally injecting test settings and a database."""
 
@@ -61,6 +67,27 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         try:
+            if engine is not None and inspect(engine).has_table("agent_runs"):
+                with factory() as session:
+                    stale_runs = session.query(AgentRun).filter(
+                        AgentRun.status.in_(("queued", "running"))
+                    )
+                    for run in stale_runs:
+                        run.status = "failed"
+                        run.error_code = "interrupted_by_restart"
+                        run.error_message = "API 服务重启，中断了任务；你可以重试。"
+                        run.finished_at = utc_now()
+                        run.events = [
+                            *(run.events or []),
+                            {
+                                "id": len(run.events or []) + 1,
+                                "event": "failed",
+                                "message": run.error_message,
+                                "code": run.error_code,
+                                "created_at": utc_now().isoformat(),
+                            },
+                        ]
+                    session.commit()
             yield
         finally:
             if engine is not None:
@@ -69,6 +96,9 @@ def create_app(
     app = FastAPI(title="OfferPilot API", version="0.1.0", lifespan=lifespan)
     app.state.settings = app_settings
     app.state.session_factory = factory
+    app.state.job_extraction_provider = (
+        job_extraction_provider or OpenAICompatibleJobExtractionProvider()
+    )
 
     @app.exception_handler(DBAPIError)
     async def handle_database_error(request: Request, error: DBAPIError) -> JSONResponse:
@@ -100,6 +130,7 @@ def create_app(
     app.include_router(jobs_router, prefix="/api/v1")
     app.include_router(profile_router, prefix="/api/v1")
     app.include_router(resumes_router, prefix="/api/v1")
+    app.include_router(agent_router, prefix="/api/v1")
 
     @app.get("/health", response_model=HealthRead, tags=["system"])
     def health(

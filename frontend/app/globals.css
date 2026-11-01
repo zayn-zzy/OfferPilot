@@ -133,6 +133,41 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .jobs-heading > p { color: var(--muted); font-size: 14px; }
 .jobs-toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
 .job-form-panel { max-width: 1012px; }
+.job-extraction-panel { display: grid; gap: 16px; }
+.job-extraction-form, .job-extraction-review { display: grid; gap: 14px; }
+.job-extraction-form label, .agent-field { display: grid; gap: 7px; color: var(--ink); font-size: 12px; font-weight: 700; }
+.job-extraction-form input, .job-extraction-form textarea, .agent-field input { width: 100%; padding: 10px 12px; border: 1px solid #dce6df; border-radius: 9px; outline: none; color: var(--ink); background: #fcfdfc; font: inherit; font-size: 13px; }
+.job-extraction-form input, .agent-field input { min-height: 43px; }
+.job-extraction-form textarea { resize: vertical; line-height: 1.7; }
+.job-extraction-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+.agent-task-state { display: grid; gap: 15px; }
+.agent-task-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
+.agent-task-heading .eyebrow { margin-bottom: 5px; }
+.agent-task-heading h3 { margin: 0; font-size: 18px; }
+.agent-task-status { padding: 6px 9px; border-radius: 7px; color: #61756d; background: #f0f5f1; font-size: 11px; }
+.agent-task-succeeded, .agent-task-confirmed { color: #28675b; background: #e8f4ed; }
+.agent-task-failed { color: #a34949; background: #fbebeb; }
+.agent-task-events { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.agent-task-events li { padding: 9px 0; display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid #edf1ed; color: var(--ink); font-size: 12px; }
+.agent-task-events time { color: #87968f; font-size: 10px; white-space: nowrap; }
+.agent-task-error { padding: 13px; border-radius: 9px; color: #8b4141; background: #fff5f4; font-size: 12px; }
+.agent-task-error p { margin: 0 0 8px; }
+.agent-task-error .button { margin-top: 4px; }
+.job-extraction-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.agent-field { min-width: 0; padding: 12px; border: 1px solid #e2ebe4; border-radius: 10px; background: #fbfdfb; }
+.agent-field-review { border-color: #e9d7b6; background: #fffcf5; }
+.agent-field-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px; }
+.agent-field-heading small, .agent-field-evidence { color: #8b6a34; font-size: 10px; font-weight: 500; }
+.agent-field-evidence { color: #647976; line-height: 1.6; overflow-wrap: anywhere; }
+.agent-source-text, .job-source-evidence { padding: 13px; border: 1px solid #e2ebe4; border-radius: 10px; background: #fbfdfb; }
+.agent-source-text summary, .job-source-evidence summary { color: var(--teal); font-size: 12px; font-weight: 700; cursor: pointer; }
+.agent-source-text pre, .job-source-evidence pre { max-height: 320px; margin: 12px 0 0; overflow: auto; color: #4d625b; font-family: inherit; font-size: 12px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.job-source-evidence { margin-top: 14px; }
+.job-source-evidence h4 { margin: 0; font-size: 13px; }
+.job-source-evidence ul { margin: 8px 0 14px; padding: 0; list-style: none; }
+.job-source-evidence li { padding: 8px 0; display: grid; gap: 4px; border-bottom: 1px solid #e7eee9; font-size: 11px; }
+.job-source-evidence li span { color: var(--muted); }
+.job-source-evidence blockquote { margin: 0; padding-left: 10px; border-left: 2px solid #afcfc1; color: #526860; line-height: 1.6; }
 .csv-import-panel { margin-bottom: 22px; }
 .csv-import-panel > .job-form-hint { margin: 0 0 15px; }
 .csv-upload-row { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
@@ -225,6 +260,7 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
   .resume-version-row .status-pill { margin-left: auto; }
   .jobs-heading { margin-top: 42px; }
   .job-form { grid-template-columns: 1fr; }
+  .job-extraction-fields { grid-template-columns: 1fr; }
   .job-field-wide { grid-column: auto; }
   .job-list-section { margin-top: 35px; padding: 0 14px; }
   .job-list-heading { align-items: flex-start; flex-direction: column; }

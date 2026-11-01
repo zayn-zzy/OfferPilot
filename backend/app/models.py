@@ -139,6 +139,56 @@ class JobPosting(Base):
     )
 
 
+class AgentRun(Base):
+    """Persisted, owner-scoped run for an asynchronous agent task."""
+
+    __tablename__ = "agent_runs"
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    job_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("job_postings.id", ondelete="SET NULL"), nullable=True
+    )
+    task_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), index=True, nullable=False)
+    input_text: Mapped[str] = mapped_column(Text, nullable=False)
+    source_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    events: Mapped[list[dict]] = mapped_column(JSON, default=list, nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    model_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    attempt_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class JobSourceEvidence(Base):
+    """Original user-provided source and field-level evidence for an extracted job."""
+
+    __tablename__ = "job_source_evidence"
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    job_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("job_postings.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    agent_run_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("agent_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    source_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    source_text: Mapped[str] = mapped_column(Text, nullable=False)
+    field_evidence: Mapped[dict] = mapped_column(JSON, nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class Application(Base):
     """One user's application tracking record for a saved job."""
 

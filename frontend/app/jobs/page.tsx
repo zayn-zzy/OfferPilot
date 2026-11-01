@@ -16,6 +16,7 @@ import {
 } from "@/lib/api";
 import JobCard from "./job-card";
 import JobEditor from "./job-editor";
+import JobExtractionPanel from "./job-extraction-panel";
 
 type Filters = { search: string; city: string; status: string; deadline_before: string; tag: string };
 
@@ -31,7 +32,7 @@ export default function JobsPage() {
   const [selectedCsvRows, setSelectedCsvRows] = useState<number[]>([]);
   const [previewingCsv, setPreviewingCsv] = useState(false);
   const [importingCsv, setImportingCsv] = useState(false);
-  const [createPanel, setCreatePanel] = useState<"new" | "csv" | null>(null);
+  const [createPanel, setCreatePanel] = useState<"new" | "csv" | "extract" | null>(null);
   const [filters, setFilters] = useState<Filters>({ search: "", city: "", status: "", deadline_before: "", tag: "" });
   const [draftFilters, setDraftFilters] = useState(filters);
   const [loading, setLoading] = useState(true);
@@ -214,6 +215,7 @@ export default function JobsPage() {
         <div className="jobs-toolbar">
           <button aria-expanded={createPanel === "new"} className="button button-primary" onClick={() => setCreatePanel((current) => current === "new" ? null : "new")} type="button">{createPanel === "new" ? "收起新增" : "新增岗位"}</button>
           <button aria-expanded={createPanel === "csv"} className="button button-secondary" onClick={() => setCreatePanel((current) => current === "csv" ? null : "csv")} type="button">{createPanel === "csv" ? "收起导入" : "导入 CSV"}</button>
+          <button aria-expanded={createPanel === "extract"} className="button button-secondary" onClick={() => setCreatePanel((current) => current === "extract" ? null : "extract")} type="button">{createPanel === "extract" ? "收起 AI 提取" : "AI 提取岗位"}</button>
         </div>
       </section>
 
@@ -327,6 +329,15 @@ export default function JobsPage() {
       {createPanel === "new" && <section className="profile-panel job-form-panel">
         <div className="profile-panel-heading"><h2>新增岗位</h2></div>
         <JobEditor onSave={createJob} onCancel={() => setCreatePanel(null)} />
+      </section>}
+
+      {createPanel === "extract" && <section className="profile-panel job-form-panel">
+        <div className="profile-panel-heading"><div><p className="eyebrow">Agent 岗位抽取</p><h2>从招聘原文提取岗位字段</h2></div></div>
+        <JobExtractionPanel onCancel={() => setCreatePanel(null)} onJobCreated={() => {
+          setCreatePanel(null);
+          setSuccess("岗位已保存，原文和字段依据已关联。可在岗位卡片中查看。");
+          void loadJobs();
+        }} />
       </section>}
 
       <section className="job-list-section">

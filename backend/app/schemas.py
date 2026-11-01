@@ -175,7 +175,7 @@ class JobPostingWrite(BaseModel):
     required_skills: list[str] = Field(default_factory=list, max_length=50)
     description: str | None = Field(default=None, max_length=30_000)
     source_url: str | None = Field(default=None, max_length=2048)
-    source_type: Literal["manual", "paste", "link"] = "manual"
+    source_type: Literal["manual", "paste", "link", "agent"] = "manual"
     tags: list[str] = Field(default_factory=list, max_length=30)
 
     @field_validator(
@@ -302,7 +302,7 @@ class JobPostingRead(BaseModel):
     required_skills: list[str]
     description: str | None
     source_url: str | None
-    source_type: Literal["manual", "paste", "link"]
+    source_type: Literal["manual", "paste", "link", "agent"]
     source_captured_at: datetime
     tags: list[str]
     review_status: Literal["needs_review", "verified"]
@@ -339,3 +339,94 @@ class JobBulkImportWrite(BaseModel):
     """Owner-confirmed CSV jobs to save in one database transaction."""
 
     jobs: list[JobPostingWrite] = Field(min_length=1, max_length=500)
+
+
+class AgentJobExtractionCreate(BaseModel):
+    """User-provided job text submitted for structured extraction."""
+
+    text: str = Field(min_length=20, max_length=30_000)
+    source_url: str | None = Field(default=None, max_length=2048)
+
+    @field_validator("text")
+    @classmethod
+    def normalize_source_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 20:
+            raise ValueError("岗位描述至少需要 20 个字符")
+        return normalized
+
+    @field_validator("source_url")
+    @classmethod
+    def validate_source_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed = urlsplit(value.strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("来源链接必须以 http:// 或 https:// 开头")
+        return value.strip()
+
+
+class AgentTaskRead(BaseModel):
+    """Observable task state without exposing stored raw prompt text."""
+
+    id: UUID
+    task_type: Literal["job_extraction"]
+    status: Literal["queued", "running", "succeeded", "failed", "confirmed"]
+    source_url: str | None
+    result: dict | None
+    events: list[dict]
+    error_code: str | None
+    error_message: str | None
+    model_name: str | None
+    attempt_count: int
+    job_id: UUID | None
+    created_at: datetime
+    updated_at: datetime
+    finished_at: datetime | None
+
+
+class AgentTaskSourceRead(BaseModel):
+    """Owner-only source text used for evidence review before confirmation."""
+
+    task_id: UUID
+    source_url: str | None
+    source_text: str
+
+
+class JobExtractionConfirm(BaseModel):
+    """Optional user corrections applied before extracted data becomes a job."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_url: str | None = Field(default=None, max_length=2048)
+    company_name: str | None = Field(default=None, max_length=200)
+    title: str | None = Field(default=None, max_length=200)
+    city: str | None = Field(default=None, max_length=120)
+    job_type: str | None = Field(default=None, max_length=80)
+    batch: str | None = Field(default=None, max_length=120)
+    deadline: date | None = None
+    education_requirement: str | None = Field(default=None, max_length=120)
+    required_skills: list[str] | None = Field(default=None, max_length=50)
+
+    @field_validator("source_url")
+    @classmethod
+    def validate_source_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed = urlsplit(value.strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("来源链接必须以 http:// 或 https:// 开头")
+        return value.strip()
+
+
+class JobSourceEvidenceRead(BaseModel):
+    """Original source text and field citations for a saved extracted job."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    job_id: UUID
+    source_url: str | None
+    source_text: str
+    field_evidence: dict
+    captured_at: datetime

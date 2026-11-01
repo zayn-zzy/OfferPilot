@@ -48,6 +48,14 @@ bun run dev
 
 岗位页默认展示一个列表，新增岗位和 CSV 导入按需展开。点击某张岗位卡片的“编辑”，会在该卡片内展开表单，保存或取消后收起；投递阶段、简历版本、备注、下一步与历史也在同一张卡片维护。手动录入的岗位不再显示“待核验/已核验”标签或核验按钮，信息不足时直接编辑补充。
 
+### Agent 岗位信息提取
+
+岗位页的“AI 提取岗位”接收用户粘贴的招聘原文（20–30,000 字符）和可选来源链接，不会自动访问网站。原文会发送到你配置的模型服务商处理，请先确认服务商符合你的隐私要求。后端通过 OpenAI 兼容的 Chat Completions 接口提取公司、职位、城市、类型、批次、截止日期、学历和技能；每个字段附置信度和原文引用。服务端会核对引用是否逐字出现在用户文本中，不成立的字段将置信度降为 0。用户逐项检查/修改后确认，岗位和原文来源依据才会保存；低置信度、缺失值或无引用的字段会标记为“需要确认”。
+
+复制 `.env.example` 到仓库根目录 `.env` 并配置 `OFFERPILOT_LLM_BASE_URL`、`OFFERPILOT_LLM_API_KEY` 与 `OFFERPILOT_LLM_MODEL`，Compose API 会读取这些变量。直接本地启动 API 时，把相同变量放在 `backend/.env`。支持以 `/v1` 结尾的 API 根地址，或直接提供 `/v1/chat/completions` 地址。密钥只在 API 进程内读取，不通过设置接口或任务响应返回。未配置时任务会显示明确失败原因，配置完成后可重试。
+
+提取任务会将状态、进度事件、尝试次数、模型名和安全错误摘要保存在数据库中；前端通过 SSE 读取实时进度，也会从任务 API 恢复状态。失败任务最多尝试 3 次；进程重启导致的排队/运行中任务会转为失败并可重试。当前阶段使用 FastAPI 进程内后台任务；第 6 步引入 Celery/Redis 后再将执行迁移到持久化队列。这个抽取过程没有浏览器抓取工具，也不执行外部写操作。
+
 ## 后端开发与测试
 
 ```bash
@@ -86,3 +94,7 @@ bun run build
 - `GET /api/v1/jobs/import/template`、`POST /api/v1/jobs/import/preview`、`POST /api/v1/jobs/import`：下载岗位 CSV 模板、预览校验并原子批量保存选中的岗位。
 - `POST/PUT/DELETE /api/v1/jobs/{id}/application`：创建、更新或清除岗位卡片中的投递记录。
 - `GET /api/v1/jobs/{id}/application/history`：查看用户确认的阶段变更记录。
+- `POST /api/v1/agent/job-extractions`：创建岗位原文抽取任务；`GET /api/v1/agent/tasks`、`GET /api/v1/agent/tasks/{id}` 查询当前用户的任务。
+- `GET /api/v1/agent/tasks/{id}/events`：SSE 进度流；`POST /api/v1/agent/tasks/{id}/retry` 重试失败任务；`GET /api/v1/agent/tasks/{id}/source` 读取待确认原文。
+- `DELETE /api/v1/agent/tasks/{id}`：删除未确认的失败/成功任务及其暂存原文；已确认任务需删除关联岗位。
+- `POST /api/v1/agent/tasks/{id}/confirm`：应用用户核对后的字段并保存岗位；`GET /api/v1/agent/jobs/{job_id}/evidence` 查看来源原文和字段引用。

@@ -14,9 +14,11 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.models import (
+    AgentRun,
     Application,
     ApplicationStatusEvent,
     Company,
+    JobSourceEvidence,
     JobPosting,
     ResumeVersion,
     User,
@@ -605,6 +607,14 @@ def delete_job(
             ApplicationStatusEvent.application_id == application.id
         ).delete(synchronize_session=False)
         session.delete(application)
+    session.query(JobSourceEvidence).filter(
+        JobSourceEvidence.job_id == job.id,
+        JobSourceEvidence.user_id == user.id,
+    ).delete(synchronize_session=False)
+    session.query(AgentRun).filter(
+        AgentRun.job_id == job.id,
+        AgentRun.user_id == user.id,
+    ).delete(synchronize_session=False)
     session.delete(job)
     session.commit()
     return None

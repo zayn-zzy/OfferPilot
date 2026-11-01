@@ -70,7 +70,7 @@ export type JobPosting = {
   required_skills: string[];
   description: string | null;
   source_url: string | null;
-  source_type: "manual" | "paste" | "link";
+  source_type: "manual" | "paste" | "link" | "agent";
   source_captured_at: string;
   tags: string[];
   review_status: "needs_review" | "verified";
@@ -94,7 +94,7 @@ export type JobPostingWrite = {
   required_skills: string[];
   description: string | null;
   source_url: string | null;
-  source_type: "manual" | "paste" | "link";
+  source_type: "manual" | "paste" | "link" | "agent";
   tags: string[];
 };
 
@@ -133,6 +133,51 @@ export type ResumeVersionSummary = {
   created_at: string;
   confirmed_at: string | null;
   extracted_char_count: number;
+};
+
+export type ExtractedJobField = {
+  value: string | string[] | null;
+  confidence: number;
+  evidence: string | null;
+};
+
+export type AgentTaskEvent = {
+  id: number;
+  event: "progress" | "completed" | "failed" | "confirmed";
+  message: string;
+  step?: string;
+  code?: string;
+  needs_review_count?: number;
+  created_at: string;
+};
+
+export type AgentTask = {
+  id: string;
+  task_type: "job_extraction";
+  status: "queued" | "running" | "succeeded" | "failed" | "confirmed";
+  source_url: string | null;
+  result: {
+    fields: Record<string, ExtractedJobField>;
+    needs_review_fields: string[];
+  } | null;
+  events: AgentTaskEvent[];
+  error_code: string | null;
+  error_message: string | null;
+  model_name: string | null;
+  attempt_count: number;
+  job_id: string | null;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+};
+
+export type JobSourceEvidence = {
+  id: string;
+  job_id: string;
+  source_url: string | null;
+  source_text: string;
+  field_evidence: Record<string, ExtractedJobField>;
+  captured_at: string;
 };
 
 export async function apiRequest<T = void>(path: string, options: RequestInit = {}): Promise<T> {

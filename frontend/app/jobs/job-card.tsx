@@ -6,8 +6,10 @@ import {
   APPLICATION_STAGE_LABELS,
   type ApplicationStatusEvent,
   type JobPosting,
+  type JobSourceEvidence,
   type JobPostingWrite,
   type ResumeVersionSummary,
+  apiRequest,
 } from "@/lib/api";
 import JobEditor from "./job-editor";
 
@@ -107,6 +109,10 @@ export default function JobCard(props: JobCardProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [sourceEvidence, setSourceEvidence] = useState<JobSourceEvidence | null>(null);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
+  const [evidenceError, setEvidenceError] = useState("");
   const hasDetails = Boolean(
     job.description || job.company_notes || job.education_requirement || job.industry
     || job.recruitment_url || job.company_website_url
@@ -146,6 +152,23 @@ export default function JobCard(props: JobCardProps) {
     }
   }
 
+  async function toggleEvidence() {
+    if (evidenceOpen) {
+      setEvidenceOpen(false);
+      return;
+    }
+    setEvidenceLoading(true);
+    setEvidenceError("");
+    try {
+      setSourceEvidence(await apiRequest<JobSourceEvidence>(`/api/v1/agent/jobs/${job.id}/evidence`));
+      setEvidenceOpen(true);
+    } catch (cause) {
+      setEvidenceError(cause instanceof Error ? cause.message : "无法读取来源依据。");
+    } finally {
+      setEvidenceLoading(false);
+    }
+  }
+
   return (
     <article aria-label={`${job.company_name || "未填写公司"} ${job.title || "未填写职位"}`} className="job-card">
       <div className="job-card-heading">
@@ -181,8 +204,19 @@ export default function JobCard(props: JobCardProps) {
       <div className="job-card-actions">
         <button aria-expanded={panel === "edit"} aria-controls={`job-edit-${job.id}`} className="button button-secondary" disabled={busy} onClick={() => togglePanel("edit")} type="button">{panel === "edit" ? "取消编辑" : "编辑"}</button>
         <button aria-expanded={panel === "application"} aria-controls={`job-progress-${job.id}`} className="job-quiet-action" disabled={busy} onClick={() => togglePanel("application")} type="button">{panel === "application" ? "收起投递记录" : "投递记录"}</button>
+        {job.source_type === "agent" && <button aria-expanded={evidenceOpen} className="job-quiet-action" disabled={evidenceLoading} onClick={() => void toggleEvidence()} type="button">{evidenceLoading ? "读取依据中…" : evidenceOpen ? "收起抽取依据" : "抽取依据"}</button>}
         <button className="job-quiet-action danger-text" disabled={busy} onClick={() => void remove()} type="button">删除</button>
       </div>
+      {evidenceError && <p className="form-error" role="alert">{evidenceError}</p>}
+      {evidenceOpen && sourceEvidence && <section className="job-source-evidence" aria-label="岗位字段抽取依据">
+        <h4>字段来源依据</h4>
+        <ul>{Object.entries(sourceEvidence.field_evidence).map(([field, item]) => <li key={field}>
+          <strong>{({ company_name: "公司", title: "职位", city: "地点", job_type: "岗位类型", batch: "招聘批次", deadline: "截止日期", education_requirement: "学历要求", required_skills: "技能" } as Record<string, string>)[field] ?? field}</strong>
+          <span>{Array.isArray(item.value) ? item.value.join("、") : item.value || "未提取"} · 置信度 {Math.round(item.confidence * 100)}%</span>
+          {item.evidence && <blockquote>{item.evidence}</blockquote>}
+        </li>)}</ul>
+        <details><summary>查看保存的招聘原文</summary><pre>{sourceEvidence.source_text}</pre></details>
+      </section>}
       {error && <p className="form-error" role="alert">{error}</p>}
       {notice && <p className="job-card-notice" role="status">{notice}</p>}
       {busy && <p className="job-card-notice" role="status">正在保存…</p>}
