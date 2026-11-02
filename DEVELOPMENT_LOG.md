@@ -337,11 +337,20 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 
 ### 技术与上一版本的区别
 
-上一版本通过 Celery/Redis 定时处理提醒与站内通知；本次加入可复用的版本化 Skill 工作流、基于来源证据的草稿生成、显式审批、幂等本地执行与审计。工作流步骤及状态持久化在现有 FastAPI/SQLAlchemy 中，模型调用沿用 OpenAI 兼容接口；后台提醒仍由 Celery/Redis 负责。本模块暂未引入 LangGraph，AgentRun 使用 FastAPI `BackgroundTasks` 执行模型任务，进程重启后依靠已保存状态和用户重试恢复，不把 Redis 任务队列误作此流程的持久执行保证。
+上一版本通过 Celery/Redis 定时处理提醒与站内通知；本次加入可复用的版本化 Skill 工作流、基于来源证据的草稿生成、显式审批、幂等本地执行与审计。根据 PRD，现由 LangGraph `StateGraph` 编排“上下文校验 → 草稿生成 → 引用校验 → 人工审批 → 本地保存”。普通业务校验和写入仍由确定性服务代码负责；模型调用沿用 OpenAI 兼容接口，提醒仍由 Celery/Redis 处理。`AgentRun` 保存产品可见的任务、状态和事件，LangGraph checkpointer 单独保存暂停/恢复所需的图状态。
 
 ### 验证
 
-- 后端 `.venv/bin/pytest -o addopts='' -q tests/test_skills.py`：11 项通过。覆盖六种模板、输入校验、幂等与用户隔离、引用清洗、模型失败、审批过期/篡改检查、重复执行、简历删除清理及 OpenAI 兼容 Provider 请求格式；使用 Fake Provider/MockTransport，不调用真实模型。
-- 前端 `bun run typecheck`、Python `compileall` 和 `git diff --check`：通过。
+- 后端 `.venv/bin/pytest -o addopts='' -q tests/test_skills.py`：LangGraph 对齐后 12 项通过。覆盖六种模板、输入校验、幂等与用户隔离、引用清洗、模型失败、审批过期/篡改检查、拒绝后的重新运行边界、重复执行、简历删除清理及 OpenAI 兼容 Provider 请求格式；使用 Fake Provider/MockTransport，不调用真实模型。
+- 测试覆盖真实 `ainvoke` 图节点、SQLite 检查点中断与恢复、审批后本地保存；测试用 SQLite 检查点数据库与业务测试数据库隔离。前端 `bun run typecheck`、`.venv/bin/python -m compileall -q app tests`、`uv lock --check` 和 `git diff --check` 通过。
 - 在独立临时 SQLite 上验证完整 Alembic 升级链及从 `20261101_0007` 升级/降级数据保留；本机 `backend/offerpilot.db` 先备份至 `backend/storage/backups/offerpilot-before-0008-20261102.sqlite3`（权限 `0600`），再成功迁移到 `20261102_0008`。
 - 迁移集成测试文件在既有 ASGI 注册请求处等待且未运行到迁移断言，已停止该用例。额外尝试排除迁移文件后的后端回归集，30 秒内没有产生结果，已中断；因此只报告定向 Skills 测试，不将全量回归算作通过。真实模型、浏览器端到端、Redis Worker/Beat 和 Docker Compose 联调也未执行。迁移本身由独立临时数据库全链路与本机升级验证。
+
+### PRD 对齐修正：LangGraph 编排与检查点
+
+- 将先前仅由 `AgentRun` 显式阶段驱动的流程改为 LangGraph `StateGraph`；`AgentRun` 保留为业务运行记录，LangGraph 负责图节点推进及人工审批中断/恢复，两者职责不同。
+- 图状态只保存 `run_id`、阶段结果及审批决定，不写入简历、岗位原文或模型草稿；草稿及用户可见事件仍保存于用户隔离的业务表。
+- PostgreSQL 模式使用 `AsyncPostgresSaver`，SQLite 本地模式将 checkpoint 写入存储目录独立文件；每次运行以 `run_id:attempt_count` 作为 thread ID，审批执行时沿用同一 thread ID，通过 `Command(resume=...)` 恢复。
+- 人工审批节点只为申请准备包触发 `interrupt`；其他 Skill 会越过审批及保存步骤。执行节点再次核对审批主体、动作、目标岗位、有效期、草稿哈希和审批摘要哈希，再执行唯一允许的本地数据库保存，并记录审计事件。
+- 测试发现当前依赖组合中连续条件边会在异步执行时挂起，因此图改为静态有向顺序边；节点根据 `outcome` 和 `decision` 跳过不适用的工作，审批中断和批准后的恢复仍在图内完成。
+- 运行任务仍由 FastAPI `BackgroundTasks` 触发，checkpoint 不等同于持久任务队列；服务重启后尚未完成的 `queued/running` 记录由应用启动逻辑标记失败并允许手动重试。审批暂停对应的图 checkpoint 会保留。

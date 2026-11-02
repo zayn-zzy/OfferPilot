@@ -66,7 +66,7 @@ export default function SkillsPage() {
   const canRequestApproval = activeRun?.skill_id === "application_prep_pack"
     && activeRun.status === "succeeded"
     && !activeApproval
-    && latestRunApproval?.status !== "executed";
+    && (!latestRunApproval || latestRunApproval.status === "expired");
   const hasQuestionInput = skillId === "application_answers" || skillId === "application_prep_pack";
   const usesResume = ["resume_targeting", "application_answers", "interview_prep", "application_prep_pack"].includes(skillId);
 
@@ -349,7 +349,7 @@ export default function SkillsPage() {
               {canRequestApproval && <button className="button button-secondary" disabled={working} onClick={() => void requestApproval(activeRun)} type="button">{latestRunApproval ? "重新申请保存审批" : "申请保存到工作台"}</button>}
               {activeApproval?.status === "pending" && <div className="skill-approval-card"><strong>待确认操作</strong><p>{activeApproval.summary}</p><small>审批有效期至 {new Date(activeApproval.expires_at).toLocaleString("zh-CN")}</small><div><button className="button button-primary" disabled={working} onClick={() => void approveAndSave(activeApproval)} type="button">核对后批准并保存</button><button className="button button-secondary" disabled={working} onClick={() => void rejectApproval(activeApproval)} type="button">拒绝</button></div></div>}
               {activeApproval?.status === "approved" && <div className="skill-approval-card"><strong>已批准，尚未写入</strong><p>{activeApproval.summary}</p><button className="button button-primary" disabled={working} onClick={() => void approveAndSave(activeApproval)} type="button">确认执行本地保存</button></div>}
-              {latestRunApproval && !activeApproval && latestRunApproval.status !== "executed" && <p className="skill-approval-status">{new Date(latestRunApproval.expires_at).getTime() <= Date.now() ? "审批已过期，可重新申请。" : APPROVAL_LABELS[latestRunApproval.status]}</p>}
+              {latestRunApproval && !activeApproval && latestRunApproval.status !== "executed" && <p className="skill-approval-status">{latestRunApproval.status === "expired" ? "审批已过期，可重新申请。" : latestRunApproval.status === "rejected" ? "审批已拒绝；如仍需保存，请重新运行申请准备包。" : latestRunApproval.status === "invalidated" ? "草稿或目标变化导致审批失效；请重新运行 Skill 生成新草稿。" : APPROVAL_LABELS[latestRunApproval.status]}</p>}
               {latestRunApproval?.status === "executed" && <p className="skill-approval-status">{APPROVAL_LABELS.executed}</p>}
             </div>}
           </div>}

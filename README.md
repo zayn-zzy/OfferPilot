@@ -109,7 +109,9 @@ cd backend
 uv run alembic upgrade head
 ```
 
-Skill 执行使用 API 进程内后台任务并将状态保存到业务数据库；API 重启中断的任务会显示失败，可手动重试。提醒投递仍由独立 Celery Worker/Beat 负责。
+Skill 由 API 进程内后台任务触发，并由 LangGraph `StateGraph` 编排“上下文校验 → 草稿生成 → 引用校验 → 人工审批 → 本地保存”节点。`AgentRun` 保存面向产品的状态、步骤、结果和错误；LangGraph checkpointer 保存暂停/恢复所需的图状态。PostgreSQL 使用 LangGraph PostgreSQL checkpointer；SQLite 本地模式将检查点放在 `storage/langgraph-checkpoints.sqlite3`，与业务库分开。图状态只放任务 ID 和审批决定，不放简历或模型草稿正文。
+
+`application_prep_pack` 在人工审批节点暂停；用户批准后，执行 API 使用同一 `thread_id` 恢复图，再次校验审批有效期、岗位归属和草稿哈希后才保存。API 重启时，尚未完成的 `queued/running` 任务会标记失败并允许手动重试；审批暂停状态和检查点可留存以供恢复。FastAPI `BackgroundTasks` 仍不是持久任务队列，提醒投递仍由独立 Celery Worker/Beat 负责。
 
 ## 后端开发与测试
 

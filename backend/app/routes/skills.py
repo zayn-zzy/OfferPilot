@@ -8,6 +8,7 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from langgraph.types import Command
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -43,10 +44,16 @@ from app.schemas import (
 from app.services.skills import (
     SKILL_BY_ID,
     SKILLS,
+    SkillDraftCandidate,
     SkillProvider,
     SkillServiceError,
     source_text_for_model,
     validate_skill_draft,
+)
+from app.services.skill_graph import (
+    SkillWorkflowState,
+    build_skill_graph,
+    open_skill_checkpointer,
 )
 
 router = APIRouter(prefix="/skills", tags=["skills"])
@@ -80,7 +87,11 @@ def _append_event(run: AgentRun, event: str, message: str, **details: object) ->
 def _skill_run_read(run: AgentRun) -> SkillRunRead:
     if run.skill_id not in SKILL_BY_ID or run.skill_version is None or run.job_id is None:
         raise HTTPException(status_code=500, detail="求职 Skill 任务记录不完整。")
-    result = SkillDraftRead.model_validate(run.result) if run.result else None
+    result = (
+        SkillDraftRead.model_validate(run.result)
+        if run.result and run.status == "succeeded"
+        else None
+    )
     return SkillRunRead(
         id=run.id,
         skill_id=run.skill_id,  # type: ignore[arg-type]
@@ -304,68 +315,161 @@ def _context_for_run(
     return job_data, profile_data, questions, sources, truncated
 
 
-async def run_skill_workflow(
-    run_id: UUID,
-    session_factory: sessionmaker[Session],
-    settings: Settings,
-    provider: SkillProvider,
-) -> None:
-    """Run explicit validate, generate, evidence-check, and persist workflow nodes."""
+class _SkillGraphNodes:
+    """Database and model operations called by named LangGraph nodes."""
 
-    with session_factory() as session:
-        run = session.get(AgentRun, run_id)
-        if run is None or run.status != "queued":
-            return
-        run.status = "running"
-        run.attempt_count += 1
-        run.error_code = None
-        run.error_message = None
-        run.finished_at = None
-        _append_event(run, "progress", "正在检查岗位、简历与研究资料权限。", step="validate_context")
-        try:
-            job_data, profile_data, questions, sources, source_truncated = _context_for_run(
-                session, run
+    def __init__(
+        self,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        provider: SkillProvider,
+    ) -> None:
+        self.session_factory = session_factory
+        self.settings = settings
+        self.provider = provider
+
+    def _mark_failed(
+        self,
+        session: Session,
+        run: AgentRun,
+        code: str,
+        message: str,
+        step: str,
+    ) -> None:
+        run.status = "failed"
+        run.error_code = code
+        run.error_message = message
+        run.finished_at = utc_now()
+        _append_event(run, "failed", message, code=code, step=step)
+
+    def validate_context(self, state: SkillWorkflowState) -> dict[str, object]:
+        """Check required user-owned context without placing PII in graph state."""
+
+        run_id = UUID(state["run_id"])
+        with self.session_factory() as session:
+            run = session.get(AgentRun, run_id)
+            if run is None or run.status != "queued":
+                return {"outcome": "cancelled"}
+            run.status = "running"
+            run.attempt_count += 1
+            run.error_code = None
+            run.error_message = None
+            run.finished_at = None
+            _append_event(
+                run,
+                "progress",
+                "正在检查岗位、简历与研究资料权限。",
+                step="validate_context",
             )
-        except SkillServiceError as exc:
-            run.status = "failed"
-            run.error_code = exc.code
-            run.error_message = exc.message
-            run.finished_at = utc_now()
-            _append_event(run, "failed", exc.message, code=exc.code, step="validate_context")
+            try:
+                _context_for_run(session, run)
+            except SkillServiceError as exc:
+                self._mark_failed(session, run, exc.code, exc.message, "validate_context")
+                session.commit()
+                return {"outcome": "failed"}
             session.commit()
-            return
-        skill = SKILL_BY_ID[run.skill_id or ""]
-        _append_event(run, "progress", "输入权限已确认，正在生成草稿。", step="generate_draft")
-        session.commit()
+        return {"outcome": "ready"}
 
-    try:
-        candidate, model_name = await provider.generate(
-            skill,
-            job=job_data,
-            profile=profile_data,
-            questions=questions,
-            sources=sources,
-            settings=settings,
-        )
-        draft = validate_skill_draft(candidate, sources)
-        if source_truncated:
-            draft.warnings.append("部分超长资料仅使用前段生成，请在保存前检查完整原文。")
-    except SkillServiceError as exc:
-        failure_code, failure_message = exc.code, exc.message
-    except Exception as exc:  # Do not log prompt, resume text, API keys, or provider bodies.
-        logger.error("Skill workflow %s failed (%s)", run_id, type(exc).__name__)
-        failure_code = "skill_workflow_error"
-        failure_message = "求职草稿生成遇到意外错误，请检查配置后重试。"
-    else:
-        with session_factory() as session:
+    async def generate_draft(self, state: SkillWorkflowState) -> dict[str, object]:
+        """Generate a structured candidate and keep it private until evidence checks."""
+
+        run_id = UUID(state["run_id"])
+        with self.session_factory() as session:
             run = session.get(AgentRun, run_id)
             if run is None or run.status != "running":
-                return
+                return {"outcome": "cancelled"}
+            try:
+                job_data, profile_data, questions, sources, _ = _context_for_run(session, run)
+            except SkillServiceError as exc:
+                self._mark_failed(session, run, exc.code, exc.message, "generate_draft")
+                session.commit()
+                return {"outcome": "failed"}
+            skill = SKILL_BY_ID[run.skill_id or ""]
+            _append_event(run, "progress", "正在调用模型生成结构化草稿。", step="generate_draft")
+            session.commit()
+
+        try:
+            candidate, model_name = await self.provider.generate(
+                skill,
+                job=job_data,
+                profile=profile_data,
+                questions=questions,
+                sources=sources,
+                settings=self.settings,
+            )
+        except SkillServiceError as exc:
+            failure_code, failure_message = exc.code, exc.message
+        except Exception as exc:  # Never log prompts, resume text, keys, or provider bodies.
+            logger.error("Skill graph %s failed (%s)", run_id, type(exc).__name__)
+            failure_code = "skill_workflow_error"
+            failure_message = "求职草稿生成遇到意外错误，请检查配置后重试。"
+        else:
+            with self.session_factory() as session:
+                run = session.get(AgentRun, run_id)
+                if run is None or run.status != "running":
+                    return {"outcome": "cancelled"}
+                run.result = candidate.model_dump(mode="json")
+                run.model_name = model_name
+                _append_event(
+                    run,
+                    "progress",
+                    "模型已返回结构化草稿，正在校验引用证据。",
+                    step="generate_draft",
+                )
+                session.commit()
+            return {"outcome": "generated"}
+
+        with self.session_factory() as session:
+            run = session.get(AgentRun, run_id)
+            if run is not None and run.status == "running":
+                self._mark_failed(
+                    session,
+                    run,
+                    failure_code,
+                    failure_message,
+                    "generate_draft",
+                )
+                session.commit()
+        return {"outcome": "failed"}
+
+    def validate_evidence(self, state: SkillWorkflowState) -> dict[str, object]:
+        """Verify model citations against original sources and persist the safe draft."""
+
+        run_id = UUID(state["run_id"])
+        with self.session_factory() as session:
+            run = session.get(AgentRun, run_id)
+            if run is None or run.status != "running" or not run.result:
+                return {"outcome": "cancelled"}
+            try:
+                _, _, _, sources, source_truncated = _context_for_run(session, run)
+                candidate = SkillDraftCandidate.model_validate(run.result)
+                draft = validate_skill_draft(candidate, sources)
+                if source_truncated:
+                    draft.warnings.append(
+                        "部分超长资料仅使用前段生成，请在保存前检查完整原文。"
+                    )
+            except (SkillServiceError, ValueError) as exc:
+                if isinstance(exc, SkillServiceError):
+                    code, message = exc.code, exc.message
+                else:
+                    code, message = (
+                        "invalid_skill_candidate",
+                        "模型草稿未通过结构校验，请重新运行。",
+                    )
+                self._mark_failed(session, run, code, message, "validate_evidence")
+                session.commit()
+                return {"outcome": "failed"}
+
             run.result = draft.model_dump(mode="json")
-            run.model_name = model_name
             run.status = "succeeded"
             run.finished_at = utc_now()
-            _append_event(run, "progress", "模型结果已通过结构和引用校验。", step="validate_evidence")
+            requires_approval = run.skill_id == "application_prep_pack"
+            _append_event(
+                run,
+                "progress",
+                "模型结果已通过结构和引用校验。",
+                step="validate_evidence",
+            )
             _append_event(
                 run,
                 "completed",
@@ -373,18 +477,219 @@ async def run_skill_workflow(
                 step="completed",
             )
             session.commit()
-        return
+        return {"outcome": "succeeded", "requires_approval": requires_approval}
 
+    def execute_local_save(self, state: SkillWorkflowState) -> dict[str, object]:
+        """Revalidate approval and perform the graph's sole allowlisted write."""
+
+        run_id = UUID(state["run_id"])
+        try:
+            approval_id = UUID(state["approval_id"])
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail="审批关联信息无效。") from exc
+
+        with self.session_factory() as session:
+            approval = session.get(ApprovalRequest, approval_id)
+            run = session.get(AgentRun, run_id)
+            if (
+                approval is None
+                or run is None
+                or approval.agent_run_id != run.id
+                or approval.user_id != run.user_id
+            ):
+                raise HTTPException(status_code=404, detail="审批或求职任务不存在。")
+
+            existing_pack = session.scalar(
+                select(ApplicationPrepPack).where(
+                    ApplicationPrepPack.user_id == run.user_id,
+                    ApplicationPrepPack.agent_run_id == run.id,
+                )
+            )
+            if existing_pack is not None and approval.status == "executed":
+                return {"outcome": "executed", "pack_id": str(existing_pack.id)}
+            if approval.status != "approved":
+                raise HTTPException(status_code=409, detail="只有已批准的操作可以执行。")
+
+            now = utc_now()
+            job = session.scalar(
+                select(JobPosting).where(
+                    JobPosting.id == approval.job_id,
+                    JobPosting.user_id == run.user_id,
+                )
+            )
+            payload_hash, approval_hash = _expected_approval_hash(approval, run)
+            if (
+                _utc(approval.expires_at) <= now
+                or job is None
+                or run.status != "succeeded"
+                or run.skill_id != "application_prep_pack"
+                or approval.action_type != SAVE_PREP_PACK_ACTION
+                or payload_hash != approval.payload_hash
+                or approval_hash != approval.approval_hash
+            ):
+                approval.status = (
+                    "expired" if _utc(approval.expires_at) <= now else "invalidated"
+                )
+                approval.updated_at = now
+                _audit(
+                    session,
+                    user_id=run.user_id,
+                    approval_id=approval.id,
+                    action=(
+                        "approval_expired"
+                        if approval.status == "expired"
+                        else "approval_invalidated"
+                    ),
+                    entity_type="application_prep_pack",
+                    entity_id=run.id,
+                    details={"reason": "execution_revalidation_failed"},
+                )
+                session.commit()
+                raise HTTPException(status_code=409, detail="草稿、目标或审批已变化，不能保存。")
+
+            pack = ApplicationPrepPack(
+                user_id=run.user_id,
+                job_id=job.id,
+                agent_run_id=run.id,
+                skill_id=run.skill_id,
+                skill_version=run.skill_version or "",
+                content=run.result or {},
+                created_at=now,
+            )
+            session.add(pack)
+            approval.status = "executed"
+            approval.executed_at = now
+            approval.updated_at = now
+            _audit(
+                session,
+                user_id=run.user_id,
+                approval_id=approval.id,
+                action="application_prep_pack_saved",
+                entity_type="application_prep_pack",
+                entity_id=run.id,
+                details={"job_id": str(job.id), "skill_version": run.skill_version or ""},
+            )
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                existing_pack = session.scalar(
+                    select(ApplicationPrepPack).where(
+                        ApplicationPrepPack.user_id == run.user_id,
+                        ApplicationPrepPack.agent_run_id == run.id,
+                    )
+                )
+                if existing_pack is None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="准备包保存冲突，请刷新后重试。",
+                    ) from None
+                return {"outcome": "executed", "pack_id": str(existing_pack.id)}
+            return {"outcome": "executed", "pack_id": str(pack.id)}
+
+
+def _skill_thread_id(run_id: UUID, attempt_count: int) -> str:
+    return f"{run_id}:{attempt_count}"
+
+
+async def _invoke_skill_graph(
+    run_id: UUID,
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+    provider: SkillProvider,
+    *,
+    resume: dict[str, str] | None = None,
+    checkpoint_saver=None,
+) -> dict[str, object]:
     with session_factory() as session:
         run = session.get(AgentRun, run_id)
-        if run is None or run.status != "running":
-            return
-        run.status = "failed"
-        run.error_code = failure_code
-        run.error_message = failure_message
-        run.finished_at = utc_now()
-        _append_event(run, "failed", failure_message, code=failure_code, step="generate_draft")
-        session.commit()
+        if run is None:
+            raise HTTPException(status_code=404, detail="求职 Skill 任务不存在。")
+        attempt_count = run.attempt_count
+        if resume is None:
+            attempt_count += 1
+
+    async with open_skill_checkpointer(
+        settings.database_url,
+        settings.storage_dir,
+        checkpoint_saver,
+    ) as checkpointer:
+        graph = build_skill_graph(
+            checkpointer,
+            _SkillGraphNodes(session_factory, settings, provider),
+        )
+        graph_input = Command(resume=resume) if resume is not None else {"run_id": str(run_id)}
+        return await graph.ainvoke(
+            graph_input,
+            {"configurable": {"thread_id": _skill_thread_id(run_id, attempt_count)}},
+            durability="sync",
+        )
+
+
+async def run_skill_workflow(
+    run_id: UUID,
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+    provider: SkillProvider,
+    checkpoint_saver=None,
+) -> dict[str, object] | None:
+    """Invoke LangGraph for a new run and checkpoint it under a stable attempt ID."""
+
+    try:
+        return await _invoke_skill_graph(
+            run_id,
+            session_factory,
+            settings,
+            provider,
+            checkpoint_saver=checkpoint_saver,
+        )
+    except Exception as exc:
+        logger.error("Skill graph %s could not start (%s)", run_id, type(exc).__name__)
+        with session_factory() as session:
+            run = session.get(AgentRun, run_id)
+            if run is not None and run.status in {"queued", "running"}:
+                _SkillGraphNodes(session_factory, settings, provider)._mark_failed(
+                    session,
+                    run,
+                    "skill_graph_error",
+                    "求职工作流启动失败，请检查服务后重试。",
+                    "graph_start",
+                )
+                session.commit()
+        return None
+
+
+async def resume_skill_workflow(
+    run_id: UUID,
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+    provider: SkillProvider,
+    *,
+    approval_id: UUID,
+    decision: str,
+    checkpoint_saver=None,
+) -> dict[str, object]:
+    """Resume a paused LangGraph thread with a validated human decision."""
+
+    if decision not in {"approved", "rejected"}:
+        raise HTTPException(status_code=422, detail="审批决定无效。")
+    try:
+        return await _invoke_skill_graph(
+            run_id,
+            session_factory,
+            settings,
+            provider,
+            resume={"approval_id": str(approval_id), "decision": decision},
+            checkpoint_saver=checkpoint_saver,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Skill graph %s could not resume (%s)", run_id, type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail="求职工作流无法恢复，请刷新任务状态后重试。",
+        ) from None
 
 
 @router.get("", response_model=list[SkillCatalogItem])
@@ -523,6 +828,7 @@ def create_skill_run(
         request.app.state.session_factory,
         settings,
         request.app.state.skill_provider,
+        request.app.state.skill_checkpoint_saver,
     )
     return _skill_run_read(run)
 
@@ -581,6 +887,7 @@ def retry_skill_run(
         request.app.state.session_factory,
         settings,
         request.app.state.skill_provider,
+        request.app.state.skill_checkpoint_saver,
     )
     return _skill_run_read(run)
 
@@ -709,6 +1016,11 @@ def request_prep_pack_approval(
     if existing is not None:
         if existing.status == "executed":
             return _approval_read(existing)
+        if existing.status in {"rejected", "invalidated"}:
+            raise HTTPException(
+                status_code=409,
+                detail="该准备包的审批已结束或失效，请重新运行申请准备包后再申请保存。",
+            )
         if existing.status in {"pending", "approved"}:
             current_hash = _canonical_hash(
                 {
@@ -842,7 +1154,7 @@ def approve_request(
 
 
 @router.post("/approvals/{approval_id}/reject", response_model=ApprovalRequestRead)
-def reject_request(
+async def reject_request(
     approval_id: UUID,
     request: Request,
     user: Annotated[User, Depends(current_user_dependency)],
@@ -851,25 +1163,39 @@ def reject_request(
 ) -> ApprovalRequestRead:
     enforce_same_origin(request, settings)
     approval = _owned_approval(session, user, approval_id)
+    if approval.status == "rejected":
+        return _approval_read(approval)
     if approval.status != "pending":
         raise HTTPException(status_code=409, detail="该审批不处于待确认状态。")
-    now = utc_now()
-    expired = _utc(approval.expires_at) <= now
-    approval.status = "expired" if expired else "rejected"
-    approval.updated_at = now
-    _audit(
-        session,
-        user_id=user.id,
+    if approval.status == "pending":
+        now = utc_now()
+        expired = _utc(approval.expires_at) <= now
+        approval.status = "expired" if expired else "rejected"
+        approval.updated_at = now
+        _audit(
+            session,
+            user_id=user.id,
+            approval_id=approval.id,
+            action="approval_expired" if expired else "approval_rejected",
+            entity_type="application_prep_pack",
+            entity_id=approval.agent_run_id,
+            details={"approval_hash": approval.approval_hash},
+        )
+        session.commit()
+        if expired:
+            raise HTTPException(status_code=409, detail="审批已过期，请重新申请并检查草稿。")
+        session.refresh(approval)
+
+    run = _owned_skill_run(session, user, approval.agent_run_id)
+    await resume_skill_workflow(
+        run.id,
+        request.app.state.session_factory,
+        settings,
+        request.app.state.skill_provider,
         approval_id=approval.id,
-        action="approval_expired" if expired else "approval_rejected",
-        entity_type="application_prep_pack",
-        entity_id=approval.agent_run_id,
-        details={"approval_hash": approval.approval_hash},
+        decision="rejected",
+        checkpoint_saver=request.app.state.skill_checkpoint_saver,
     )
-    session.commit()
-    if expired:
-        raise HTTPException(status_code=409, detail="审批已过期，请重新申请并检查草稿。")
-    session.refresh(approval)
     return _approval_read(approval)
 
 
@@ -880,7 +1206,7 @@ def _utc(value):
 
 
 @router.post("/approvals/{approval_id}/execute", response_model=ApplicationPrepPackRead)
-def execute_approved_action(
+async def execute_approved_action(
     approval_id: UUID,
     request: Request,
     response: Response,
@@ -888,7 +1214,7 @@ def execute_approved_action(
     session: Annotated[Session, Depends(session_dependency)],
     settings: Annotated[Settings, Depends(settings_dependency)],
 ) -> ApplicationPrepPackRead:
-    """Execute the sole MVP allowlisted write after approval and a fresh hash check."""
+    """Resume the paused graph; its executor rechecks approval and writes the local pack."""
 
     enforce_same_origin(request, settings)
     approval = _owned_approval(session, user, approval_id)
@@ -922,71 +1248,26 @@ def execute_approved_action(
         raise HTTPException(status_code=403, detail="此操作没有可用的执行器。")
 
     run = _owned_skill_run(session, user, approval.agent_run_id)
-    payload_hash, approval_hash = _expected_approval_hash(approval, run)
-    job = session.scalar(
-        select(JobPosting).where(
-            JobPosting.id == approval.job_id,
-            JobPosting.user_id == user.id,
-        )
-    )
-    if (
-        job is None
-        or run.status != "succeeded"
-        or run.skill_id != "application_prep_pack"
-        or payload_hash != approval.payload_hash
-        or approval_hash != approval.approval_hash
-    ):
-        approval.status = "invalidated"
-        approval.updated_at = now
-        _audit(
-            session,
-            user_id=user.id,
-            approval_id=approval.id,
-            action="approval_invalidated",
-            entity_type="application_prep_pack",
-            entity_id=approval.agent_run_id,
-            details={"reason": "approved_content_or_target_changed_before_execution"},
-        )
-        session.commit()
-        raise HTTPException(status_code=409, detail="草稿或目标岗位已变化，审批已失效。")
-
-    pack = ApplicationPrepPack(
-        user_id=user.id,
-        job_id=job.id,
-        agent_run_id=run.id,
-        skill_id=run.skill_id,
-        skill_version=run.skill_version or "",
-        content=run.result or {},
-        created_at=now,
-    )
-    session.add(pack)
-    approval.status = "executed"
-    approval.executed_at = now
-    approval.updated_at = now
-    _audit(
-        session,
-        user_id=user.id,
+    await resume_skill_workflow(
+        run.id,
+        request.app.state.session_factory,
+        settings,
+        request.app.state.skill_provider,
         approval_id=approval.id,
-        action="application_prep_pack_saved",
-        entity_type="application_prep_pack",
-        entity_id=run.id,
-        details={"job_id": str(job.id), "skill_version": run.skill_version or ""},
+        decision="approved",
+        checkpoint_saver=request.app.state.skill_checkpoint_saver,
     )
-    try:
-        session.commit()
-    except IntegrityError:
-        session.rollback()
-        existing_pack = session.scalar(
-            select(ApplicationPrepPack).where(
-                ApplicationPrepPack.user_id == user.id,
-                ApplicationPrepPack.agent_run_id == approval.agent_run_id,
-            )
+    session.expire_all()
+    pack = session.scalar(
+        select(ApplicationPrepPack).where(
+            ApplicationPrepPack.user_id == user.id,
+            ApplicationPrepPack.agent_run_id == run.id,
         )
-        if existing_pack is None:
-            raise HTTPException(status_code=409, detail="准备包保存冲突，请刷新后重试。") from None
-        response.status_code = status.HTTP_200_OK
-        return ApplicationPrepPackRead.model_validate(existing_pack)
-    session.refresh(pack)
+    )
+    if pack is None:
+        raise HTTPException(status_code=503, detail="LangGraph 已恢复但未返回已保存的准备包。")
+    session.refresh(approval)
+    response.status_code = status.HTTP_201_CREATED
     return ApplicationPrepPackRead.model_validate(pack)
 
 

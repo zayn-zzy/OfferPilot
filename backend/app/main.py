@@ -51,6 +51,7 @@ from app.services.company_research import (
     create_company_research_mcp_server,
 )
 from app.services.skills import SkillProvider, OpenAICompatibleSkillProvider
+from app.services.skill_graph import in_memory_checkpointer_for
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +135,7 @@ def create_app(
         company_research_summarizer or OpenAICompatibleCompanyResearchSummarizer()
     )
     app.state.skill_provider = skill_provider or OpenAICompatibleSkillProvider()
+    app.state.skill_checkpoint_saver = in_memory_checkpointer_for(app_settings.database_url)
     app.state.company_research_mcp_server = create_company_research_mcp_server(
         app_settings, search_provider
     )

@@ -13,7 +13,6 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Response
 from httpx import MockTransport
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
 from sqlalchemy import create_engine
 from starlette.requests import Request
 
@@ -36,6 +35,8 @@ from app.routes.skills import (
     create_skill_run,
     execute_approved_action,
     request_prep_pack_approval,
+    reject_request,
+    run_skill_workflow,
 )
 from app.routes.resumes import delete_resume
 from app.schemas import SkillRunCreate
@@ -81,17 +82,17 @@ class FakeSkillProvider:
 
 @pytest.fixture
 def test_context(tmp_path: Path) -> Generator[dict[str, object], None, None]:
+    database_url = f"sqlite:///{tmp_path / 'skills.sqlite3'}"
     engine = create_engine(
-        "sqlite://",
+        database_url,
         connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
     factory: sessionmaker[Session] = sessionmaker(bind=engine, expire_on_commit=False)
     settings = Settings(
         _env_file=None,
         environment="test",
-        database_url="sqlite://",
+        database_url=database_url,
         secret_key="skills-test-secret-that-is-long-enough",
         allowed_origins=["http://localhost:3000"],
         storage_dir=tmp_path / "storage",
@@ -177,26 +178,28 @@ def make_successful_prep_run(context: dict[str, object]) -> UUID:
         task_type="skill_workflow",
         skill_id="application_prep_pack",
         skill_version="1.0.0",
-        status="succeeded",
+        status="queued",
         input_text="{}",
-        result={
-            "summary": "申请准备包",
-            "checklist": [],
-            "sections": [
-                {
-                    "title": "申请回答",
-                    "content": "请补充真实项目结果。",
-                    "citations": [],
-                    "needs_user_input": True,
-                }
-            ],
-            "open_questions": [],
-            "warnings": [],
-        },
         events=[],
     )
     session.add(run)
     session.commit()
+    factory = context["factory"]
+    provider = context["provider"]
+    app = context["app"]
+    assert isinstance(factory, sessionmaker) and isinstance(provider, FakeSkillProvider)
+    workflow_result = asyncio.run(
+        run_skill_workflow(
+            run.id,
+            factory,
+            context["settings"],
+            provider,
+            app.state.skill_checkpoint_saver,
+        )
+    )
+    assert workflow_result is not None and workflow_result.get("__interrupt__")
+    session.refresh(run)
+    assert run.status == "succeeded"
     return run.id
 
 
@@ -275,7 +278,15 @@ def test_workflow_persists_steps_and_removes_invalid_citations(test_context: dic
     )
     session.add(run)
     session.commit()
-    asyncio.run(run_skill_workflow(run.id, factory, context["settings"], provider))
+    result = asyncio.run(
+        run_skill_workflow(
+            run.id,
+            factory,
+            context["settings"],
+            provider,
+            context["app"].state.skill_checkpoint_saver,
+        )
+    )
     session.refresh(run)
     assert run.status == "succeeded"
     assert run.result is not None
@@ -287,11 +298,13 @@ def test_workflow_persists_steps_and_removes_invalid_citations(test_context: dic
         "queued",
         "validate_context",
         "generate_draft",
+        "generate_draft",
         "validate_evidence",
         "completed",
     ]
     submitted_sources = provider.calls[0]["sources"]
     assert any(source["id"] == "confirmed-resume" for source in submitted_sources)
+    assert result is not None and result.get("__interrupt__")
 
 
 def test_missing_confirmed_resume_fails_before_model_request(test_context: dict[str, object]) -> None:
@@ -312,7 +325,15 @@ def test_missing_confirmed_resume_fails_before_model_request(test_context: dict[
     )
     session.add(run)
     session.commit()
-    asyncio.run(run_skill_workflow(run.id, factory, context["settings"], provider))
+    asyncio.run(
+        run_skill_workflow(
+            run.id,
+            factory,
+            context["settings"],
+            provider,
+            context["app"].state.skill_checkpoint_saver,
+        )
+    )
     session.refresh(run)
     assert run.status == "failed"
     assert run.error_code == "confirmed_resume_required"
@@ -338,7 +359,15 @@ def test_provider_failure_is_persisted_for_visible_retry(test_context: dict[str,
     )
     session.add(run)
     session.commit()
-    asyncio.run(run_skill_workflow(run.id, factory, context["settings"], provider))
+    asyncio.run(
+        run_skill_workflow(
+            run.id,
+            factory,
+            context["settings"],
+            provider,
+            context["app"].state.skill_checkpoint_saver,
+        )
+    )
     session.refresh(run)
     assert run.status == "failed"
     assert run.attempt_count == 1
@@ -364,14 +393,14 @@ def test_approval_is_hash_bound_and_saves_only_after_explicit_approval(
     )
     assert approval.status == "pending"
     with pytest.raises(HTTPException) as not_approved:
-        execute_approved_action(
+        asyncio.run(execute_approved_action(
             approval.id,
             make_request(context["app"], f"/api/v1/skills/approvals/{approval.id}/execute"),
             Response(),
             owner,
             session,
             context["settings"],
-        )
+        ))
     assert not_approved.value.status_code == 409
     approved = approve_request(
         approval.id,
@@ -382,27 +411,27 @@ def test_approval_is_hash_bound_and_saves_only_after_explicit_approval(
     )
     assert approved.status == "approved"
     response = Response()
-    pack = execute_approved_action(
+    pack = asyncio.run(execute_approved_action(
         approval.id,
         make_request(context["app"], f"/api/v1/skills/approvals/{approval.id}/execute"),
         response,
         owner,
         session,
         context["settings"],
-    )
+    ))
     assert pack.agent_run_id == run_id
-    assert response.status_code == 200
+    assert response.status_code == 201
     assert session.scalar(select(ApprovalRequest).where(ApprovalRequest.id == approval.id)).status == "executed"
     assert session.scalar(select(ApplicationPrepPack).where(ApplicationPrepPack.agent_run_id == run_id))
     assert session.scalar(select(AuditEvent).where(AuditEvent.user_id == owner.id))
-    duplicate = execute_approved_action(
+    duplicate = asyncio.run(execute_approved_action(
         approval.id,
         make_request(context["app"], f"/api/v1/skills/approvals/{approval.id}/execute"),
         Response(),
         owner,
         session,
         context["settings"],
-    )
+    ))
     assert duplicate.id == pack.id
 
 
@@ -457,6 +486,43 @@ def test_approval_expires_and_can_be_requested_again(test_context: dict[str, obj
     assert renewed.id != first.id
 
 
+def test_rejected_approval_requires_a_new_skill_run(test_context: dict[str, object]) -> None:
+    context = test_context
+    session = context["session"]
+    assert isinstance(session, Session)
+    owner = session.get(User, context["owner"])
+    assert owner is not None
+    run_id = make_successful_prep_run(context)
+    approval = request_prep_pack_approval(
+        run_id, make_request(context["app"]), owner, session, context["settings"]
+    )
+    rejected = asyncio.run(
+        reject_request(
+            approval.id,
+            make_request(context["app"]),
+            owner,
+            session,
+            context["settings"],
+        )
+    )
+    assert rejected.status == "rejected"
+    duplicate_rejection = asyncio.run(
+        reject_request(
+            approval.id,
+            make_request(context["app"]),
+            owner,
+            session,
+            context["settings"],
+        )
+    )
+    assert duplicate_rejection.status == "rejected"
+    with pytest.raises(HTTPException) as duplicate:
+        request_prep_pack_approval(
+            run_id, make_request(context["app"]), owner, session, context["settings"]
+        )
+    assert duplicate.value.status_code == 409
+
+
 def test_execute_rechecks_content_after_approval(test_context: dict[str, object]) -> None:
     context = test_context
     session = context["session"]
@@ -471,16 +537,18 @@ def test_execute_rechecks_content_after_approval(test_context: dict[str, object]
     run.result = {**run.result, "summary": "已变化的草稿"}
     session.commit()
     with pytest.raises(HTTPException) as invalidated:
-        execute_approved_action(
+        asyncio.run(execute_approved_action(
             approval.id,
             make_request(context["app"]),
             Response(),
             owner,
             session,
             context["settings"],
-        )
+        ))
     assert invalidated.value.status_code == 409
-    assert session.get(ApprovalRequest, approval.id).status == "invalidated"
+    session.expire_all()
+    stored_approval = session.get(ApprovalRequest, approval.id)
+    assert stored_approval is not None and stored_approval.status == "invalidated"
     assert session.scalar(select(ApplicationPrepPack).where(ApplicationPrepPack.agent_run_id == run_id)) is None
 
 
@@ -496,14 +564,14 @@ def test_deleting_resume_removes_derived_skill_drafts_and_approvals(
     run_id = make_successful_prep_run(context)
     approval = request_prep_pack_approval(run_id, make_request(context["app"]), owner, session, context["settings"])
     approve_request(approval.id, make_request(context["app"]), owner, session, context["settings"])
-    execute_approved_action(
+    asyncio.run(execute_approved_action(
         approval.id,
         make_request(context["app"]),
         Response(),
         owner,
         session,
         context["settings"],
-    )
+    ))
     assert session.get(ApplicationPrepPack, session.scalar(select(ApplicationPrepPack.id)))
 
     delete_resume(
