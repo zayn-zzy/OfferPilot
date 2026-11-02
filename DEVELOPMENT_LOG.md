@@ -409,3 +409,22 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 
 - `backend/.venv/bin/pytest -o addopts='' -q tests/test_company_archive.py`：2 项通过，覆盖公司归档聚合、最新研究选择、引用与过期状态、无证据提示及跨用户隔离。
 - `backend/.venv/bin/python -m compileall -q app tests`、FastAPI OpenAPI 路由注册检查、在 `frontend/` 执行 `bun run typecheck` 和 `git diff --check` 通过。未调用真实搜索或模型服务，也未完成浏览器端到端联调。
+
+## PRD 设置与数据控制：导出与账户删除
+
+### 完成内容
+
+- 新增 `/settings` 页面，展示当前账户邮箱与时区、当前站内通知渠道，以及模型/搜索服务的配置边界；时区仍从提醒中心修改。网页不读取、不回显服务端 API 密钥，密钥继续由部署者通过 `backend/.env` 配置。
+- 新增 `GET /api/v1/account/export`，以 ZIP 提供账户资料、简历解析文本、岗位/投递/公司记录、Agent 任务、审批审计、提醒通知、笔记和 RAG 文本片段。已上传且仍存在的 PDF/DOCX 原件一并导出；缺失原文件会在清单中注明。密码哈希、服务密钥和派生 embedding 数值不导出。
+- 新增 `DELETE /api/v1/account/me`。操作需要再次提交当前密码和完全匹配的账户邮箱；服务端校验同源请求后，按外键依赖顺序删除账户业务记录、Agent 历史、提醒通知与 RAG 向量片段，删除账户私有文件目录并清除登录 Cookie。
+- 文件目录会先在同一存储根目录内暂存；数据库删除事务失败时恢复目录，避免只删文件却保留账户。当前模型的用户表使用逐表显式删除，因此在 SQLite 外键检查未启用时也会清理所有用户记录。
+- 复用既有数据库表，没有新增迁移。仪表盘增加设置入口，README 补充数据范围和 API。
+
+### 技术与上一模块的区别
+
+上一模块按公司聚合招聘信息和研究证据；本次加入账户级隐私控制，不调用模型或外部服务。导出使用 SQLAlchemy 按 `user_id` 隔离读取、内存/临时文件滚动的 ZIP 构建和流式下载；删除使用子记录优先的数据库事务与同文件系统目录重命名，成功后清理暂存目录。
+
+### 验证
+
+- 后端 `.venv/bin/pytest -o addopts='' -q tests/test_account_data_controls.py`：3 项通过，覆盖导出用户隔离及简历原件、错误邮箱/密码阻止删除、成功删除全部用户表记录/RAG 片段/私有文件并清除 Cookie。
+- `.venv/bin/python -m compileall -q app tests`、FastAPI OpenAPI 路由检查、前端 `bun run typecheck` 和 `git diff --check` 通过。未运行完整后端回归、浏览器端到端或生产数据库联调。

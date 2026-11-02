@@ -37,6 +37,7 @@ export default function DashboardPage() {
           <Link className="text-link" href="/companies">公司档案</Link>
           <Link className="text-link" href="/jobs">岗位管理</Link>
           <Link className="text-link" href="/reminders">提醒中心</Link>
+          <Link className="text-link" href="/settings">设置</Link>
           <button className="text-button" onClick={logout} type="button">退出登录</button>
         </div>
       </header>

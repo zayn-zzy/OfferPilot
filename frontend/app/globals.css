@@ -72,6 +72,28 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .dashboard-shell { background: radial-gradient(ellipse at 50% 0, #e4f2e9 0, var(--canvas) 42%); }
 .dashboard-topbar { max-width: 1000px; border-bottom: 1px solid #dce7df; }
 .dashboard-actions { display: flex; align-items: center; gap: 22px; }
+.settings-shell { min-height: 100vh; padding-bottom: 70px; background: radial-gradient(ellipse at 50% 0, #e4f2e9 0, var(--canvas) 38%); }
+.settings-topbar { margin-bottom: 48px; }
+.settings-heading { max-width: 900px; margin: 0 auto 28px; padding: 0 24px; }
+.settings-heading h1 { font-size: clamp(30px, 4vw, 42px); }
+.settings-heading > p:last-child { color: var(--muted); font-size: 14px; line-height: 1.8; }
+.settings-panel h2 { margin: 0 0 10px; font-size: 19px; }
+.settings-panel > p:not(.eyebrow) { max-width: 720px; color: var(--muted); font-size: 13px; line-height: 1.8; }
+.settings-panel > .button { margin-top: 5px; }
+.settings-account-data { margin: 18px 0 0; display: grid; gap: 12px; }
+.settings-account-data > div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; font-size: 13px; }
+.settings-account-data dt { color: var(--muted); }
+.settings-account-data dd { margin: 0; overflow-wrap: anywhere; }
+.settings-account-data a { color: var(--teal); font-weight: 700; }
+.settings-subtle { font-size: 11px !important; }
+.settings-danger-panel { border-color: #ecd6d2; }
+.settings-danger-panel .eyebrow, .settings-danger-panel h2 { color: #983c3c; }
+.settings-delete-form { max-width: 450px; margin-top: 19px; display: grid; gap: 9px; }
+.settings-delete-form label { margin-top: 5px; font-size: 12px; font-weight: 700; }
+.settings-delete-form input { width: 100%; height: 43px; padding: 0 12px; border: 1px solid #dce6df; border-radius: 9px; outline: none; background: #fcfdfc; font: inherit; font-size: 13px; }
+.settings-delete-form input:focus { border-color: #76aa9b; box-shadow: 0 0 0 3px #26786e14; }
+.settings-delete-button { justify-self: start; margin-top: 7px; color: #fff; background: #a53f3f; }
+.settings-delete-button:hover { background: #8f3333; }
 .dashboard-welcome { max-width: 850px; margin: 75px auto 0; padding: 0 24px; }
 .dashboard-welcome h1 { font-size: clamp(27px, 4vw, 40px); overflow-wrap: anywhere; }
 .dashboard-welcome > p:last-child { color: var(--muted); font-size: 14px; line-height: 1.8; }
@@ -236,6 +258,10 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .agent-planner-footnote { max-width: 900px; margin: 15px auto; padding: 0 24px; }
 
 @media (max-width: 700px) {
+  .settings-topbar { overflow: hidden; }
+  .settings-topbar .dashboard-actions { max-width: 70vw; overflow-x: auto; gap: 13px; }
+  .settings-topbar .dashboard-actions > * { flex: 0 0 auto; font-size: 11px; }
+  .settings-heading { margin-top: 38px; }
   .skills-topbar { overflow: hidden; }
   .skills-topbar .dashboard-actions { max-width: 72vw; overflow-x: auto; gap: 13px; }
   .skills-topbar .dashboard-actions > * { flex: 0 0 auto; font-size: 11px; }
@@ -520,6 +546,7 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .company-archive-footnote { max-width: 1020px; margin: 14px auto; padding: 0 24px; color: var(--muted); font-size: 10px; line-height: 1.7; }
 
 @media (max-width: 600px) {
+  .settings-account-data > div { grid-template-columns: 1fr; gap: 4px; }
   .topbar, .dashboard-topbar { height: 68px; padding: 0 20px; }
   .hero { margin-top: 61px; }
   .hero-copy { font-size: 14px; }
