@@ -113,6 +113,28 @@ Skill 由 API 进程内后台任务触发，并由 LangGraph `StateGraph` 编排
 
 `application_prep_pack` 在人工审批节点暂停；用户批准后，执行 API 使用同一 `thread_id` 恢复图，再次校验审批有效期、岗位归属和草稿哈希后才保存。API 重启时，尚未完成的 `queued/running` 任务会标记失败并允许手动重试；审批暂停状态和检查点可留存以供恢复。FastAPI `BackgroundTasks` 仍不是持久任务队列，提醒投递仍由独立 Celery Worker/Beat 负责。
 
+### Agent 评测烟雾集
+
+`backend/evals/` 提供 50 条岗位抽取和 30 条 RAG/公司研究合成样本，覆盖缺失字段、冲突来源、旧资料、无答案，以及 4 条不可信指令文本安全探针。样本明确标记为 `synthetic_smoke_v1`，只用于验证评测代码和发现回归，不是 PRD 要求的人工标注验收集，也不能用来宣称模型达到验收门槛。当前 Provider Adapter 不暴露 token 用量，报告中的 token 与费用保持空值。
+
+不调用模型的本地数据检查：
+
+```bash
+cd backend
+uv run python -m app.evals.runner --task job_extraction
+uv run python -m app.evals.runner --task rag_company_research
+```
+
+明确添加 `--live` 才会调用配置的服务商；这可能产生 API 用量和费用。结果默认写入被 Git 忽略的 `backend/artifacts/agent-eval/`：
+
+```bash
+cd backend
+uv run python -m app.evals.runner --task job_extraction --live --limit 3
+uv run python -m app.evals.runner --task rag_company_research --live --limit 3
+```
+
+评测设计、指标含义和当前限制见 [backend/evals/README.md](backend/evals/README.md)。
+
 ## 后端开发与测试
 
 ```bash
