@@ -51,6 +51,7 @@ from app.services.company_research import (
     create_company_research_mcp_server,
 )
 from app.services.skills import SkillProvider, OpenAICompatibleSkillProvider
+from app.services.task_planner import TaskPlannerProvider, OpenAICompatibleTaskPlanner
 from app.services.skill_graph import in_memory_checkpointer_for
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,7 @@ def create_app(
     company_research_search_provider: PublicSearchProvider | None = None,
     company_research_summarizer: CompanyResearchSummaryProvider | None = None,
     skill_provider: SkillProvider | None = None,
+    task_planner_provider: TaskPlannerProvider | None = None,
 ) -> FastAPI:
     """Create an app instance, optionally injecting test settings and a database."""
 
@@ -135,6 +137,7 @@ def create_app(
         company_research_summarizer or OpenAICompatibleCompanyResearchSummarizer()
     )
     app.state.skill_provider = skill_provider or OpenAICompatibleSkillProvider()
+    app.state.task_planner_provider = task_planner_provider or OpenAICompatibleTaskPlanner()
     app.state.skill_checkpoint_saver = in_memory_checkpointer_for(app_settings.database_url)
     app.state.company_research_mcp_server = create_company_research_mcp_server(
         app_settings, search_provider

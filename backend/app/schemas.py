@@ -407,6 +407,70 @@ class AgentTaskRead(BaseModel):
     finished_at: datetime | None
 
 
+class AgentTaskPlanCreate(BaseModel):
+    """Natural-language request to draft a user-confirmed reminder."""
+
+    text: str = Field(min_length=3, max_length=4000)
+    idempotency_key: str = Field(min_length=16, max_length=128)
+
+    @field_validator("text")
+    @classmethod
+    def normalize_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 3:
+            raise ValueError("请至少输入 3 个字符描述任务")
+        return normalized
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def normalize_idempotency_key(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 16:
+            raise ValueError("幂等键至少需要 16 个字符")
+        return normalized
+
+
+class AgentTaskPlanPreview(BaseModel):
+    """Proposed reminder fields shown before a user confirms the local write."""
+
+    title: str | None = None
+    details: str | None = None
+    kind: Literal[
+        "opening", "deadline", "assessment", "interview", "follow_up", "other"
+    ] = "other"
+    event_at: datetime | None = None
+    timezone: str
+    job_id: UUID | None = None
+    job_label: str | None = None
+    clarification_question: str | None = None
+
+
+class AgentTaskPlanRead(BaseModel):
+    """Persisted natural-language plan state without exposing raw prompt text."""
+
+    id: UUID
+    task_type: Literal["task_plan"]
+    status: Literal[
+        "queued",
+        "running",
+        "awaiting_confirmation",
+        "needs_clarification",
+        "confirmed",
+        "cancelled",
+        "failed",
+    ]
+    preview: AgentTaskPlanPreview | None
+    reminder_id: UUID | None
+    events: list[dict]
+    error_code: str | None
+    error_message: str | None
+    model_name: str | None
+    attempt_count: int
+    created_at: datetime
+    updated_at: datetime
+    finished_at: datetime | None
+
+
 class AgentTaskSourceRead(BaseModel):
     """Owner-only source text used for evidence review before confirmation."""
 

@@ -277,6 +277,38 @@ export type AgentTask = {
   finished_at: string | null;
 };
 
+export type AgentTaskPlan = {
+  id: string;
+  task_type: "task_plan";
+  status:
+    | "queued"
+    | "running"
+    | "awaiting_confirmation"
+    | "needs_clarification"
+    | "confirmed"
+    | "cancelled"
+    | "failed";
+  preview: {
+    title: string | null;
+    details: string | null;
+    kind: ReminderKind;
+    event_at: string | null;
+    timezone: string;
+    job_id: string | null;
+    job_label: string | null;
+    clarification_question: string | null;
+  } | null;
+  reminder_id: string | null;
+  events: { id: number; event: string; message: string; created_at: string }[];
+  error_code: string | null;
+  error_message: string | null;
+  model_name: string | null;
+  attempt_count: number;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+};
+
 export type JobSourceEvidence = {
   id: string;
   job_id: string;

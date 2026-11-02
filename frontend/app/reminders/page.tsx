@@ -253,6 +253,7 @@ export default function RemindersPage() {
           <Link className="text-link" href="/profile">个人档案</Link>
           <Link className="text-link" href="/jobs">岗位管理</Link>
           <Link className="text-link" href="/skills">Agent Skills</Link>
+          <Link className="text-link" href="/agent">任务规划</Link>
           <button className="text-button" onClick={() => void logout()} type="button">退出登录</button>
         </nav>
       </header>
@@ -261,6 +262,7 @@ export default function RemindersPage() {
         <p className="eyebrow">招聘节奏</p>
         <h1>提醒中心</h1>
         <p>记录开放日、截止时间、测评和面试；目前仅发送站内通知。</p>
+        <p><Link className="button button-secondary" href="/agent">用自然语言规划提醒</Link></p>
         <div className="reminder-timezone-setting"><label htmlFor="reminder-timezone">账户时区</label><input id="reminder-timezone" list="common-timezones" value={timeZoneDraft} onChange={(event) => setTimeZoneDraft(event.target.value)} /><datalist id="common-timezones"><option value="Asia/Shanghai" /><option value="Asia/Tokyo" /><option value="Asia/Singapore" /><option value="Europe/London" /><option value="America/Los_Angeles" /><option value="America/New_York" /></datalist><button className="button button-secondary" disabled={savingTimeZone || timeZoneDraft === timeZone} onClick={() => void updateTimeZone()} type="button">{savingTimeZone ? "重算中…" : "保存时区并重算"}</button><span>当前：{timeZone}</span></div>
       </section>
 

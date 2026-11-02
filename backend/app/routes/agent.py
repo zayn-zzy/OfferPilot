@@ -1,14 +1,18 @@
 """Owner-scoped job extraction tasks, progress streaming, retry, and confirmation."""
 
 import asyncio
+import hashlib
 import json
 import logging
 from collections.abc import AsyncIterator
-from typing import Annotated
-from uuid import UUID
+from datetime import datetime, timezone
+from typing import Annotated, TypedDict
+from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import Response, StreamingResponse
+from langgraph.graph import END, START, StateGraph
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -20,6 +24,7 @@ from app.models import (
     Company,
     JobPosting,
     JobSourceEvidence,
+    Reminder,
     User,
     utc_now,
 )
@@ -38,6 +43,9 @@ from app.routes.jobs import (
 )
 from app.schemas import (
     AgentJobExtractionCreate,
+    AgentTaskPlanCreate,
+    AgentTaskPlanPreview,
+    AgentTaskPlanRead,
     AgentTaskRead,
     AgentTaskSourceRead,
     JobExtractionConfirm,
@@ -46,12 +54,34 @@ from app.schemas import (
     JobSourceEvidenceRead,
 )
 from app.services.job_extraction import JobExtractionError, JobExtractionProvider
+from app.services.task_planner import (
+    TaskPlanCandidate,
+    TaskPlannerError,
+    TaskPlannerProvider,
+    normalize_candidate_time,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/agent", tags=["agent"])
 MAX_ATTEMPTS = 3
 MAX_ACTIVE_TASKS_PER_USER = 3
+MAX_TASK_PLAN_ATTEMPTS = 3
 TERMINAL_STATUSES = {"succeeded", "failed", "confirmed"}
+
+
+class TaskPlanWorkflowState(TypedDict, total=False):
+    """Transient LangGraph state for one reminder-planning run."""
+
+    task_id: UUID
+    source_text: str
+    timezone: str
+    candidate: dict[str, object]
+    event_at: str | None
+    model_name: str
+    preview: dict[str, object]
+    final_status: str
+    error_code: str
+    error_message: str
 
 
 def _task_read(run: AgentRun) -> AgentTaskRead:
@@ -95,6 +125,548 @@ def _owned_task(session: Session, user: User, task_id: UUID) -> AgentRun:
     if run is None or run.task_type != "job_extraction":
         raise HTTPException(status_code=404, detail="Agent 任务不存在")
     return run
+
+
+def _task_plan_read(run: AgentRun) -> AgentTaskPlanRead:
+    result = run.result or {}
+    preview_data = result.get("preview")
+    preview = AgentTaskPlanPreview.model_validate(preview_data) if preview_data else None
+    reminder_id = result.get("reminder_id")
+    return AgentTaskPlanRead(
+        id=run.id,
+        task_type="task_plan",
+        status=run.status,
+        preview=preview,
+        reminder_id=UUID(str(reminder_id)) if reminder_id else None,
+        events=list(run.events or []),
+        error_code=run.error_code,
+        error_message=run.error_message,
+        model_name=run.model_name,
+        attempt_count=run.attempt_count,
+        created_at=run.created_at,
+        updated_at=run.updated_at,
+        finished_at=run.finished_at,
+    )
+
+
+def _append_task_plan_event(run: AgentRun, event: str, message: str, **details: object) -> None:
+    events = list(run.events or [])
+    events.append(
+        {
+            "id": len(events) + 1,
+            "event": event,
+            "message": message,
+            "created_at": utc_now().isoformat(),
+            **details,
+        }
+    )
+    run.events = events
+    run.updated_at = utc_now()
+
+
+def _task_plan_job_match(
+    session: Session, user: User, candidate: TaskPlanCandidate
+) -> tuple[UUID | None, str | None]:
+    """Link only one unambiguous job owned by this user; otherwise leave it unlinked."""
+
+    rows = session.execute(
+        select(JobPosting, Company.name)
+        .outerjoin(
+            Company,
+            (Company.id == JobPosting.company_id) & (Company.user_id == user.id),
+        )
+        .where(JobPosting.user_id == user.id)
+    ).all()
+    wanted_company = _normalize_task_match(candidate.company_name)
+    wanted_title = _normalize_task_match(candidate.job_title)
+    ranked: list[tuple[int, JobPosting, str | None]] = []
+    for job, company_name in rows:
+        actual_company = _normalize_task_match(company_name)
+        actual_title = _normalize_task_match(job.title)
+        company_score = _task_match_score(wanted_company, actual_company)
+        title_score = _task_match_score(wanted_title, actual_title)
+        if wanted_company and not company_score:
+            continue
+        if wanted_title and not title_score:
+            continue
+        if not wanted_company and not wanted_title:
+            continue
+        ranked.append((company_score + title_score, job, company_name))
+    if not ranked:
+        label = " · ".join(
+            value for value in (candidate.company_name, candidate.job_title) if value
+        )
+        return None, label or None
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    if len(ranked) > 1 and ranked[0][0] == ranked[1][0]:
+        label = " · ".join(
+            value for value in (candidate.company_name, candidate.job_title) if value
+        )
+        return None, label or None
+    _, job, company_name = ranked[0]
+    label = " · ".join(value for value in (company_name, job.title) if value) or None
+    return job.id, label
+
+
+def _normalize_task_match(value: str | None) -> str:
+    return "".join(value.casefold().split()) if value else ""
+
+
+def _task_match_score(wanted: str, actual: str) -> int:
+    if not wanted or not actual:
+        return 0
+    if wanted == actual:
+        return 4
+    if len(wanted) >= 2 and (wanted in actual or actual in wanted):
+        return 2
+    return 0
+
+
+async def run_task_plan(
+    task_id: UUID,
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+    provider: TaskPlannerProvider,
+) -> None:
+    """Run the task through LangGraph and persist its preview before awaiting confirmation."""
+
+    async def load_context(state: TaskPlanWorkflowState) -> dict[str, object]:
+        with session_factory() as session:
+            run = session.get(AgentRun, state["task_id"])
+            if run is None or run.task_type != "task_plan" or run.status != "queued":
+                return {"final_status": "skipped"}
+            run.status = "running"
+            run.attempt_count += 1
+            run.error_code = None
+            run.error_message = None
+            run.finished_at = None
+            user = session.get(User, run.user_id)
+            if user is None:
+                session.commit()
+                return {
+                    "final_status": "failed",
+                    "error_code": "owner_missing",
+                    "error_message": "任务所属账户不可用。",
+                }
+            source_text = run.input_text
+            timezone_name = user.timezone
+            _append_task_plan_event(
+                run, "progress", "正在整理提醒草稿。", step="load_context"
+            )
+            session.commit()
+            return {"source_text": source_text, "timezone": timezone_name}
+
+    async def generate_candidate(state: TaskPlanWorkflowState) -> dict[str, object]:
+        if "source_text" not in state:
+            return {}
+        try:
+            now = utc_now()
+            candidate, model_name = await provider.plan(
+                state["source_text"], state["timezone"], now, settings
+            )
+            event_at = normalize_candidate_time(
+                candidate, state["source_text"], state["timezone"], now
+            )
+            return {
+                "candidate": candidate.model_dump(mode="json"),
+                "event_at": event_at.isoformat() if event_at else None,
+                "model_name": model_name,
+            }
+        except TaskPlannerError as exc:
+            return {
+                "final_status": "failed",
+                "error_code": exc.code,
+                "error_message": exc.message,
+            }
+        except Exception as exc:  # Never log prompt text or provider response bodies.
+            logger.error("Task planning %s failed (%s)", task_id, type(exc).__name__)
+            return {
+                "final_status": "failed",
+                "error_code": "internal_task_planning_error",
+                "error_message": "任务规划遇到意外错误，请重试。",
+            }
+
+    async def validate_and_build_preview(state: TaskPlanWorkflowState) -> dict[str, object]:
+        if "candidate" not in state or state.get("final_status") == "failed":
+            return {}
+        try:
+            candidate = TaskPlanCandidate.model_validate(state["candidate"])
+            timezone_name = state["timezone"]
+            if candidate.needs_clarification:
+                preview = AgentTaskPlanPreview(
+                    timezone=timezone_name,
+                    clarification_question=candidate.clarification_question,
+                )
+                final_status = "needs_clarification"
+            else:
+                raw_event_at = state.get("event_at")
+                if raw_event_at is None:
+                    raise TaskPlannerError(
+                        "invalid_task_date", "任务日期无法确认，请重新描述。"
+                    )
+                event_at = datetime.fromisoformat(raw_event_at)
+                with session_factory() as session:
+                    run = session.get(AgentRun, state["task_id"])
+                    user = session.get(User, run.user_id) if run is not None else None
+                    if run is None or user is None:
+                        raise TaskPlannerError("owner_missing", "任务所属账户不可用。")
+                    job_id, job_label = _task_plan_job_match(session, user, candidate)
+                preview = AgentTaskPlanPreview(
+                    title=candidate.title,
+                    details=candidate.details,
+                    kind=candidate.kind,
+                    event_at=event_at,
+                    timezone=timezone_name,
+                    job_id=job_id,
+                    job_label=job_label,
+                )
+                final_status = "awaiting_confirmation"
+            return {
+                "preview": preview.model_dump(mode="json"),
+                "final_status": final_status,
+            }
+        except TaskPlannerError as exc:
+            return {
+                "final_status": "failed",
+                "error_code": exc.code,
+                "error_message": exc.message,
+            }
+        except Exception as exc:
+            logger.error("Task plan validation %s failed (%s)", task_id, type(exc).__name__)
+            return {
+                "final_status": "failed",
+                "error_code": "invalid_task_plan",
+                "error_message": "任务计划校验失败，请重试。",
+            }
+
+    async def persist_result(state: TaskPlanWorkflowState) -> dict[str, object]:
+        final_status = state.get("final_status", "skipped")
+        if final_status == "skipped":
+            return {}
+        with session_factory() as session:
+            run = session.get(AgentRun, state["task_id"])
+            if run is None or run.status != "running":
+                return {}
+            run.finished_at = utc_now()
+            if final_status == "failed":
+                run.status = "failed"
+                run.error_code = state.get("error_code", "task_plan_failed")
+                run.error_message = state.get("error_message", "任务规划失败，请重试。")
+                _append_task_plan_event(
+                    run, "failed", run.error_message, code=run.error_code
+                )
+            else:
+                run.status = final_status
+                run.result = {"preview": state["preview"]}
+                run.model_name = state.get("model_name")
+                message = (
+                    "还需要补充信息，暂未创建提醒。"
+                    if final_status == "needs_clarification"
+                    else "提醒草稿已准备好；确认前不会写入提醒中心。"
+                )
+                _append_task_plan_event(run, "completed", message, step="preview_ready")
+            session.commit()
+        return {}
+
+    graph = StateGraph(TaskPlanWorkflowState)
+    graph.add_node("load_context", load_context)
+    graph.add_node("generate_candidate", generate_candidate)
+    graph.add_node("validate_and_build_preview", validate_and_build_preview)
+    graph.add_node("persist_result", persist_result)
+    graph.add_edge(START, "load_context")
+    graph.add_edge("load_context", "generate_candidate")
+    graph.add_edge("generate_candidate", "validate_and_build_preview")
+    graph.add_edge("validate_and_build_preview", "persist_result")
+    graph.add_edge("persist_result", END)
+    await graph.compile().ainvoke({"task_id": task_id})
+
+
+def _owned_task_plan(session: Session, user: User, task_id: UUID) -> AgentRun:
+    run = session.scalar(
+        select(AgentRun).where(
+            AgentRun.id == task_id,
+            AgentRun.user_id == user.id,
+            AgentRun.task_type == "task_plan",
+        )
+    )
+    if run is None:
+        raise HTTPException(status_code=404, detail="Agent 任务计划不存在。")
+    return run
+
+
+@router.post(
+    "/task-plans",
+    response_model=AgentTaskPlanRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def create_task_plan(
+    payload: AgentTaskPlanCreate,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    user: Annotated[User, Depends(current_user_dependency)],
+    session: Annotated[Session, Depends(session_dependency)],
+    settings: Annotated[Settings, Depends(settings_dependency)],
+) -> AgentTaskPlanRead:
+    """Queue a natural-language reminder plan without performing the reminder write."""
+
+    enforce_same_origin(request, settings)
+    request_hash = hashlib.sha256(payload.text.encode("utf-8")).hexdigest()
+    existing = session.scalar(
+        select(AgentRun).where(
+            AgentRun.user_id == user.id,
+            AgentRun.idempotency_key == payload.idempotency_key,
+        )
+    )
+    if existing is not None:
+        if existing.task_type != "task_plan" or existing.request_hash != request_hash:
+            raise HTTPException(
+                status_code=409, detail="该请求标识已用于其他内容，请重新提交。"
+            )
+        return _task_plan_read(existing)
+
+    active_count = session.scalar(
+        select(func.count(AgentRun.id)).where(
+            AgentRun.user_id == user.id,
+            AgentRun.task_type == "task_plan",
+            AgentRun.status.in_(("queued", "running")),
+        )
+    )
+    if active_count and active_count >= MAX_ACTIVE_TASKS_PER_USER:
+        raise HTTPException(
+            status_code=429, detail="已有 3 个任务计划正在处理，请稍后再试。"
+        )
+
+    run = AgentRun(
+        user_id=user.id,
+        task_type="task_plan",
+        status="queued",
+        input_text=payload.text,
+        idempotency_key=payload.idempotency_key,
+        request_hash=request_hash,
+        events=[],
+    )
+    _append_task_plan_event(run, "progress", "任务已排队。", step="queued")
+    session.add(run)
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        existing = session.scalar(
+            select(AgentRun).where(
+                AgentRun.user_id == user.id,
+                AgentRun.idempotency_key == payload.idempotency_key,
+            )
+        )
+        if (
+            existing is None
+            or existing.task_type != "task_plan"
+            or existing.request_hash != request_hash
+        ):
+            raise HTTPException(
+                status_code=409, detail="任务创建冲突，请重新提交。"
+            ) from None
+        return _task_plan_read(existing)
+    session.refresh(run)
+    background_tasks.add_task(
+        run_task_plan,
+        run.id,
+        request.app.state.session_factory,
+        settings,
+        request.app.state.task_planner_provider,
+    )
+    return _task_plan_read(run)
+
+
+@router.get("/task-plans", response_model=list[AgentTaskPlanRead])
+def list_task_plans(
+    user: Annotated[User, Depends(current_user_dependency)],
+    session: Annotated[Session, Depends(session_dependency)],
+    limit: int = 20,
+) -> list[AgentTaskPlanRead]:
+    """List the current user's recent task-plan runs."""
+
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=422, detail="limit 必须在 1 到 100 之间")
+    runs = session.scalars(
+        select(AgentRun)
+        .where(AgentRun.user_id == user.id, AgentRun.task_type == "task_plan")
+        .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+        .limit(limit)
+    )
+    return [_task_plan_read(run) for run in runs]
+
+
+@router.get("/task-plans/{task_id}", response_model=AgentTaskPlanRead)
+def get_task_plan(
+    task_id: UUID,
+    user: Annotated[User, Depends(current_user_dependency)],
+    session: Annotated[Session, Depends(session_dependency)],
+) -> AgentTaskPlanRead:
+    return _task_plan_read(_owned_task_plan(session, user, task_id))
+
+
+@router.post("/task-plans/{task_id}/retry", response_model=AgentTaskPlanRead)
+def retry_task_plan(
+    task_id: UUID,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    user: Annotated[User, Depends(current_user_dependency)],
+    session: Annotated[Session, Depends(session_dependency)],
+    settings: Annotated[Settings, Depends(settings_dependency)],
+) -> AgentTaskPlanRead:
+    enforce_same_origin(request, settings)
+    run = _owned_task_plan(session, user, task_id)
+    if run.status != "failed":
+        raise HTTPException(status_code=409, detail="只有失败任务可以重试。")
+    if run.attempt_count >= MAX_TASK_PLAN_ATTEMPTS:
+        raise HTTPException(
+            status_code=409, detail="任务已达到最大重试次数，请重新创建。"
+        )
+    run.status = "queued"
+    run.error_code = None
+    run.error_message = None
+    run.finished_at = None
+    _append_task_plan_event(run, "progress", "已安排任务重试。", step="retry_queued")
+    session.commit()
+    session.refresh(run)
+    background_tasks.add_task(
+        run_task_plan,
+        run.id,
+        request.app.state.session_factory,
+        settings,
+        request.app.state.task_planner_provider,
+    )
+    return _task_plan_read(run)
+
+
+@router.post("/task-plans/{task_id}/confirm", response_model=AgentTaskPlanRead)
+def confirm_task_plan(
+    task_id: UUID,
+    request: Request,
+    user: Annotated[User, Depends(current_user_dependency)],
+    session: Annotated[Session, Depends(session_dependency)],
+    settings: Annotated[Settings, Depends(settings_dependency)],
+) -> AgentTaskPlanRead:
+    """Write the proposed reminder only after the owner explicitly confirms it."""
+
+    enforce_same_origin(request, settings)
+    run = _owned_task_plan(session, user, task_id)
+    if run.status == "confirmed":
+        return _task_plan_read(run)
+    if run.status != "awaiting_confirmation" or not run.result or not run.result.get("preview"):
+        raise HTTPException(status_code=409, detail="当前任务计划尚不可确认。")
+    preview = AgentTaskPlanPreview.model_validate(run.result["preview"])
+    if not preview.title or preview.event_at is None:
+        raise HTTPException(
+            status_code=409, detail="任务计划缺少提醒标题或日期，无法确认。"
+        )
+    now = utc_now()
+    event_at = preview.event_at
+    if event_at.tzinfo is None or event_at.utcoffset() is None:
+        event_at = event_at.replace(tzinfo=ZoneInfo(preview.timezone))
+    event_at = event_at.astimezone(timezone.utc)
+    if event_at <= now:
+        raise HTTPException(
+            status_code=409,
+            detail="提醒日期已过去，请取消后重新创建任务计划。",
+        )
+
+    job_id = preview.job_id
+    if job_id is not None:
+        job = session.scalar(
+            select(JobPosting).where(JobPosting.id == job_id, JobPosting.user_id == user.id)
+        )
+        if job is None:
+            job_id = None
+
+    idempotency_key = f"task-plan:{run.id}"
+    reminder_payload = {
+        "job_id": str(job_id) if job_id else None,
+        "title": preview.title,
+        "details": preview.details,
+        "kind": preview.kind,
+        "event_at": event_at.isoformat(),
+        "timezone": preview.timezone,
+        "lead_minutes": 0,
+        "channel": "in_app",
+    }
+    request_hash = hashlib.sha256(
+        json.dumps(reminder_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    reminder = Reminder(
+        id=uuid4(),
+        user_id=user.id,
+        job_id=job_id,
+        title=preview.title,
+        details=preview.details,
+        kind=preview.kind,
+        event_at=event_at,
+        notify_at=event_at,
+        timezone=preview.timezone,
+        lead_minutes=0,
+        channel="in_app",
+        status="scheduled",
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        schedule_revision=1,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(reminder)
+    run.job_id = job_id
+    run.status = "confirmed"
+    run.result = {**run.result, "reminder_id": str(reminder.id)}
+    run.finished_at = now
+    _append_task_plan_event(
+        run, "confirmed", "提醒已创建，可在提醒中心查看。", step="reminder_created"
+    )
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        existing = session.scalar(
+            select(Reminder).where(
+                Reminder.user_id == user.id,
+                Reminder.idempotency_key == idempotency_key,
+            )
+        )
+        if existing is None or existing.request_hash != request_hash:
+            raise HTTPException(
+                status_code=409, detail="提醒创建冲突，请重试。"
+            ) from None
+        run = _owned_task_plan(session, user, task_id)
+        run.status = "confirmed"
+        run.job_id = existing.job_id
+        run.result = {**(run.result or {}), "reminder_id": str(existing.id)}
+        run.finished_at = existing.updated_at
+        session.commit()
+        session.refresh(run)
+        return _task_plan_read(run)
+    session.refresh(run)
+    return _task_plan_read(run)
+
+
+@router.post("/task-plans/{task_id}/cancel", response_model=AgentTaskPlanRead)
+def cancel_task_plan(
+    task_id: UUID,
+    request: Request,
+    user: Annotated[User, Depends(current_user_dependency)],
+    session: Annotated[Session, Depends(session_dependency)],
+    settings: Annotated[Settings, Depends(settings_dependency)],
+) -> AgentTaskPlanRead:
+    enforce_same_origin(request, settings)
+    run = _owned_task_plan(session, user, task_id)
+    if run.status not in {"awaiting_confirmation", "needs_clarification", "failed", "cancelled"}:
+        raise HTTPException(status_code=409, detail="当前任务计划无法取消。")
+    if run.status != "cancelled":
+        run.status = "cancelled"
+        run.finished_at = utc_now()
+        _append_task_plan_event(
+            run, "cancelled", "任务计划已取消，未创建提醒。", step="cancelled"
+        )
+        session.commit()
+        session.refresh(run)
+    return _task_plan_read(run)
 
 
 async def run_job_extraction(

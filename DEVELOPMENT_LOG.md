@@ -369,3 +369,24 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 - `backend/.venv/bin/pytest -o addopts='' -q tests/test_eval.py`：4 项通过；验证数据量/分类/安全探针、字段与引用评分、RAG 冲突及弃答评分，以及使用 Fake Provider 的评测运行路径。
 - 两个评测 CLI 的无模型数据校验模式、Python `compileall`、后端依赖锁检查、前端类型检查和 `git diff --check` 通过。没有运行 live 模型评测，因此没有报告模型准确率、延迟或费用实测值。
 - 此为 PRD 第 8 步的评测基础子模块。合规的人工标注验收集、安全检查清单、生产部署配置和完整作品集演示材料仍需后续完成；当前环境没有 Docker，未执行 Compose 构建或容器联调。
+
+## PRD F-10：Agent 自然语言任务计划
+
+### 完成内容
+
+- 在 `/agent` 增加任务规划页。用户可输入自然语言求职待办，查看模型整理出的动作、提醒时间和关联岗位；需要补充日期等关键信息时页面会展示澄清问题。仪表盘和提醒中心增加入口。
+- 任务规划以 LangGraph `StateGraph` 编排“读取上下文 → 生成候选计划 → 校验日期与岗位 → 保存预览”。该图不配置 checkpoint：一次调用中的状态只在内存流转，AgentRun 保存可恢复的任务内容、用户可见状态和预览；用户确认通过独立 API 触发最终提醒写入。
+- 新增 `POST/GET /api/v1/agent/task-plans`、单条查询、重试、取消和确认接口。任务计划复用 `AgentRun` 持久化状态与事件，不新增数据库表或迁移；状态包括排队、运行、等待确认、需补充信息、已确认、已取消和失败。
+- 新增 OpenAI 兼容的结构化任务规划 Provider。模型请求包含账户时区和当前本地时间；日期不明确时要求澄清，只有日期时默认当地 09:00。关联岗位只从当前用户的数据中查找，无法唯一匹配时保留未关联草稿。
+- 用户确认前不会创建提醒。确认时由服务端把预览写入既有 Reminder 表，按计划 ID 生成幂等键；重复确认返回既有提醒。Provider 失败可重试，确认和计划写入都做账户归属检查。
+- 提示词明确将用户文本视为不可信输入，只生成站内提醒草稿；本模块不会登录招聘网站、改动投递阶段、发送消息或执行外部操作。
+
+### 技术与上一版本的区别
+
+之前已有固定输入的版本化求职 Skills 和 LangGraph 工作流；本次补上 PRD F-10 的自然语言待办规划。模型负责从请求中提出结构化提醒草稿，普通代码负责日期/时区校验、岗位归属匹配、任务状态、幂等和写入。AgentRun 提供可查询的任务生命周期，Reminder/Celery 继续负责后续站内通知。
+
+### 验证与限制
+
+- `backend/.venv/bin/pytest -o addopts='' -q tests/test_task_planner.py`：4 项通过，覆盖未确认不写提醒、确认幂等、澄清阻止确认、失败重试、当地 09:00 默认值及 OpenAI 兼容请求结构；测试使用 Fake Provider/MockTransport，没有调用真实模型。
+- `backend/.venv/bin/python -m compileall -q app tests`、FastAPI OpenAPI 路由注册检查、在 `frontend/` 执行 `bun run typecheck` 和 `git diff --check` 通过。
+- 未运行真实模型或浏览器端到端联调。尝试运行 `test_agent.py` 的 ASGI 注册流程时请求挂起，已停止该次尝试；因此不把 HTTP 登录全链路列为通过项。另尝试 `bun run build`，Next.js 优化构建持续占用 CPU 且两分钟无进度输出后停止，不计为通过。
