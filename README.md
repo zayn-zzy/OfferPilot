@@ -113,6 +113,10 @@ Skill 由 API 进程内后台任务触发，并由 LangGraph `StateGraph` 编排
 
 `application_prep_pack` 在人工审批节点暂停；用户批准后，执行 API 使用同一 `thread_id` 恢复图，再次校验审批有效期、岗位归属和草稿哈希后才保存。API 重启时，尚未完成的 `queued/running` 任务会标记失败并允许手动重试；审批暂停状态和检查点可留存以供恢复。FastAPI `BackgroundTasks` 仍不是持久任务队列，提醒投递仍由独立 Celery Worker/Beat 负责。
 
+### 公司档案
+
+登录后访问 `/companies` 可按公司查看已保存岗位、招聘批次、个人公司备注和每个岗位最新一次成功的公开研究。研究结论保留引用片段与来源链接；超过 7 天的结果会标出可能过期，缺少支持证据时会说明。可在公司档案中对具体岗位发起或刷新研究；搜索服务沿用 `OFFERPILOT_TAVILY_API_KEY`，摘要沿用现有 Chat Completions 配置。该页面读取按账户隔离的公司、岗位和 `AgentRun` 研究记录，不新增数据库表；公司备注是个人记录，公开结论仍需通过来源链接核验。
+
 ### Agent 评测烟雾集
 
 `backend/evals/` 提供 50 条岗位抽取和 30 条 RAG/公司研究合成样本，覆盖缺失字段、冲突来源、旧资料、无答案，以及 4 条不可信指令文本安全探针。样本明确标记为 `synthetic_smoke_v1`，只用于验证评测代码和发现回归，不是 PRD 要求的人工标注验收集，也不能用来宣称模型达到验收门槛。当前 Provider Adapter 不暴露 token 用量，报告中的 token 与费用保持空值。

@@ -476,6 +476,49 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .notification-read { opacity: .76; }
 .reminder-list-section .empty-state { padding: 19px; border: 1px dashed #cfded4; border-radius: 12px; color: var(--muted); background: #ffffff9c; text-align: center; font-size: 12px; }
 
+.companies-shell { min-height: 100vh; padding-bottom: 70px; background: radial-gradient(ellipse at 50% 0, #e4f2e9 0, var(--canvas) 38%); }
+.companies-topbar { max-width: 1220px; }
+.companies-heading { max-width: 1020px; margin: 48px auto 25px; padding: 0 24px; }
+.companies-heading .eyebrow { margin-bottom: 8px; }
+.companies-heading h1 { font-size: clamp(30px, 4vw, 42px); }
+.companies-heading > p:last-child { max-width: 720px; color: var(--muted); font-size: 13px; line-height: 1.8; }
+.company-archive-list { max-width: 1020px; margin: 0 auto; }
+.company-archive-empty h2 { margin: 0 0 7px; font-size: 18px; }
+.company-archive-empty p { margin: 0 0 17px; color: var(--muted); font-size: 12px; }
+.company-archive-card { max-width: none; margin: 15px 0; }
+.company-archive-heading, .company-archive-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.company-archive-heading .eyebrow { margin: 0 0 5px; }
+.company-archive-heading h2 { margin: 0; font-size: 21px; }
+.company-archive-count { padding: 6px 9px; border-radius: 7px; color: var(--teal); background: #edf6f0; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.company-archive-links { margin-top: 13px; display: flex; flex-wrap: wrap; gap: 14px; }
+.company-archive-links a, .company-archive-job-info > a { color: var(--teal); font-size: 11px; font-weight: 700; text-decoration: underline; }
+.company-archive-meta { margin: 13px 0 0; color: #526860; font-size: 11px; line-height: 1.7; }
+.company-archive-notes { margin-top: 13px; padding: 11px 13px; border-radius: 8px; background: #f6f9f6; }
+.company-archive-notes strong { font-size: 11px; }
+.company-archive-notes p { margin: 5px 0 0; color: #526860; font-size: 11px; line-height: 1.7; white-space: pre-wrap; }
+.company-research-archive, .company-archive-jobs { margin-top: 20px; padding-top: 17px; border-top: 1px solid #e9efea; }
+.company-archive-section-heading h3 { margin: 0; font-size: 14px; }
+.company-archive-section-heading span { color: var(--muted); font-size: 10px; text-align: right; }
+.company-research-summary { margin: 10px 0; color: #526860; font-size: 11px; line-height: 1.7; }
+.company-archive-no-evidence { margin: 9px 0; padding: 9px 11px; border-radius: 7px; color: #805b20; background: #fbf3e5; font-size: 10px; line-height: 1.6; }
+.company-archive-findings, .company-archive-sources ul { margin: 10px 0 0; padding: 0; list-style: none; }
+.company-archive-findings li, .company-archive-sources li { padding: 10px 0; border-top: 1px solid #edf1ed; }
+.company-archive-findings li > p { margin: 0; display: grid; gap: 5px; font-size: 11px; line-height: 1.65; }
+.company-archive-findings small, .company-archive-sources small { color: var(--muted); font-size: 9px; }
+.company-archive-findings blockquote { margin: 7px 0; padding: 8px 10px; border-left: 2px solid #9dc3b3; color: #526860; background: #f7faf7; font-size: 10px; line-height: 1.6; }
+.company-archive-findings a, .company-archive-sources a { color: var(--teal); font-size: 10px; font-weight: 700; text-decoration: underline; }
+.company-archive-sources { margin-top: 12px; padding: 11px 12px; border: 1px solid #e6ede7; border-radius: 8px; background: #fbfdfb; }
+.company-archive-sources summary { color: var(--teal); font-size: 10px; font-weight: 700; cursor: pointer; }
+.company-archive-sources li > small { margin-left: 8px; }
+.company-archive-sources li p { margin: 5px 0 0; color: #526860; font-size: 10px; line-height: 1.6; }
+.company-archive-job { padding: 12px 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; border-bottom: 1px solid #edf1ed; }
+.company-archive-job-info { min-width: 0; }
+.company-archive-job-info h4 { margin: 0; font-size: 12px; }
+.company-archive-job-info p, .company-archive-job-info small { display: block; margin: 5px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.company-archive-job-info .company-archive-job-research { color: #526860; }
+.company-archive-job > .button { min-height: 35px; flex: 0 0 auto; font-size: 10px; }
+.company-archive-footnote { max-width: 1020px; margin: 14px auto; padding: 0 24px; color: var(--muted); font-size: 10px; line-height: 1.7; }
+
 @media (max-width: 600px) {
   .topbar, .dashboard-topbar { height: 68px; padding: 0 20px; }
   .hero { margin-top: 61px; }
@@ -515,4 +558,14 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
   .reminder-create-panel .profile-panel-heading, .reminder-section-heading { align-items: flex-start; flex-direction: column; }
   .reminder-card { flex-direction: column; }
   .reminder-actions { justify-content: flex-start; }
+  .companies-topbar { overflow: hidden; }
+  .companies-topbar .dashboard-actions { max-width: 70vw; overflow-x: auto; gap: 13px; }
+  .companies-topbar .dashboard-actions > * { flex: 0 0 auto; font-size: 11px; }
+  .companies-heading { margin-top: 37px; }
+  .company-archive-list { margin: 0 14px; }
+  .company-archive-card { padding: 20px 16px; }
+  .company-archive-heading { align-items: flex-start; }
+  .company-archive-section-heading { align-items: flex-start; flex-direction: column; }
+  .company-archive-section-heading span { text-align: left; }
+  .company-archive-job { flex-direction: column; }
 }

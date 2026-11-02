@@ -390,3 +390,22 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 - `backend/.venv/bin/pytest -o addopts='' -q tests/test_task_planner.py`：4 项通过，覆盖未确认不写提醒、确认幂等、澄清阻止确认、失败重试、当地 09:00 默认值及 OpenAI 兼容请求结构；测试使用 Fake Provider/MockTransport，没有调用真实模型。
 - `backend/.venv/bin/python -m compileall -q app tests`、FastAPI OpenAPI 路由注册检查、在 `frontend/` 执行 `bun run typecheck` 和 `git diff --check` 通过。
 - 未运行真实模型或浏览器端到端联调。尝试运行 `test_agent.py` 的 ASGI 注册流程时请求挂起，已停止该次尝试；因此不把 HTTP 登录全链路列为通过项。另尝试 `bun run build`，Next.js 优化构建持续占用 CPU 且两分钟无进度输出后停止，不计为通过。
+
+## PRD F-11 子模块：公司档案聚合
+
+### 完成内容
+
+- 新增 `/companies` 公司档案页和 `GET /api/v1/companies`、`GET /api/v1/companies/{company_id}` 只读接口。接口按登录用户查询公司、岗位、投递阶段和公司研究运行记录，不依赖前端过滤。
+- 每家公司归集招聘批次、岗位截止日期、岗位来源、个人公司备注以及每个岗位最新一次成功的研究。研究事实带原文引用和来源链接；保留来源片段、搜索时间和过期状态。页面可直接对岗位启动/刷新只读公司研究。
+- 研究结果超过 7 天会在公司汇总和岗位行标出；没有研究或没有可核验证据时给出不同提示，不把缺少证据说成公司事实。搜索与摘要继续使用 Tavily 和现有 Chat Completions 配置。
+- 复用 `Company`、`JobPosting`、`Application` 和 `AgentRun` 现有表，无新增数据库迁移。公司备注单独标识为用户自己的记录，与公开搜索事实区分。
+- 仪表盘和岗位管理页增加公司档案入口；README 补充页面入口、数据来源和证据边界。
+
+### 技术与上一版本的区别
+
+上一版本可从单个岗位卡片发起研究并查看引用，但没有跨岗位的公司归档。本次按公司聚合岗位、招聘批次、用户备注和各岗位最新研究；研究本身仍沿用 MCP 只读搜索、Tavily Provider、引用校验和 AgentRun 持久化，不新建重复研究记录表。
+
+### 验证与限制
+
+- `backend/.venv/bin/pytest -o addopts='' -q tests/test_company_archive.py`：2 项通过，覆盖公司归档聚合、最新研究选择、引用与过期状态、无证据提示及跨用户隔离。
+- `backend/.venv/bin/python -m compileall -q app tests`、FastAPI OpenAPI 路由注册检查、在 `frontend/` 执行 `bun run typecheck` 和 `git diff --check` 通过。未调用真实搜索或模型服务，也未完成浏览器端到端联调。

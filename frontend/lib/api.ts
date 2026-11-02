@@ -203,6 +203,60 @@ export type CompanyResearch = {
   warning: string | null;
 };
 
+export type CompanyArchive = {
+  id: string;
+  name: string;
+  industry: string | null;
+  website_url: string | null;
+  recruitment_url: string | null;
+  notes: string | null;
+  batches: string[];
+  jobs: {
+    id: string;
+    title: string | null;
+    city: string | null;
+    job_type: string | null;
+    batch: string | null;
+    deadline: string | null;
+    application_status: string | null;
+    source_url: string | null;
+    source_captured_at: string;
+    research_summary: string | null;
+    research_is_stale: boolean | null;
+    research_no_evidence: boolean | null;
+    researched_at: string | null;
+  }[];
+  research_summary: string;
+  research_count: number;
+  finding_count: number;
+  source_count: number;
+  last_researched_at: string | null;
+  stale_research_count: number;
+  no_evidence: boolean;
+  findings: {
+    job_id: string;
+    job_title: string | null;
+    claim: string;
+    quote: string;
+    source_title: string;
+    source_url: string;
+    researched_at: string;
+    is_stale: boolean;
+  }[];
+  sources: {
+    research_run_id: string;
+    job_id: string;
+    job_title: string | null;
+    source_id: string;
+    title: string;
+    url: string;
+    excerpt: string;
+    age: string | null;
+    researched_at: string;
+    is_stale: boolean;
+  }[];
+};
+
 export type ReminderKind = "opening" | "deadline" | "assessment" | "interview" | "follow_up" | "other";
 export type ReminderStatus = "scheduled" | "paused" | "notified" | "completed" | "cancelled" | "failed";
 

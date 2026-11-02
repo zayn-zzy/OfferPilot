@@ -23,6 +23,7 @@ from app.db import (
 from app.models import AgentRun, Base, utc_now
 from app.routes.agent import router as agent_router
 from app.routes.auth import router as auth_router
+from app.routes.companies import router as companies_router
 from app.routes.jobs import router as jobs_router
 from app.routes.knowledge import router as knowledge_router
 from app.routes.matching import router as matching_router
@@ -170,6 +171,7 @@ def create_app(
         allow_headers=["Content-Type"],
     )
     app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(companies_router, prefix="/api/v1")
     app.include_router(jobs_router, prefix="/api/v1")
     app.include_router(profile_router, prefix="/api/v1")
     app.include_router(resumes_router, prefix="/api/v1")

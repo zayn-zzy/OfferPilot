@@ -249,6 +249,7 @@ export default function JobsPage() {
           <Link className="text-link" href="/profile">个人档案</Link>
           <Link className="text-link" href="/knowledge">资料问答</Link>
           <Link className="text-link" href="/skills">Agent Skills</Link>
+          <Link className="text-link" href="/companies">公司档案</Link>
           <Link className="text-link" href="/reminders">提醒中心</Link>
           <button className="text-button" onClick={() => void logout()} type="button">退出登录</button>
         </nav>

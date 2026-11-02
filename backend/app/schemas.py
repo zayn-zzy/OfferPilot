@@ -631,6 +631,66 @@ class CompanyResearchRead(BaseModel):
     warning: str | None = None
 
 
+class CompanyArchiveJobRead(BaseModel):
+    id: UUID
+    title: str | None
+    city: str | None
+    job_type: str | None
+    batch: str | None
+    deadline: date | None
+    application_status: str | None
+    source_url: str | None
+    source_captured_at: datetime
+    research_summary: str | None
+    research_is_stale: bool | None
+    research_no_evidence: bool | None
+    researched_at: datetime | None
+
+
+class CompanyArchiveFindingRead(BaseModel):
+    job_id: UUID
+    job_title: str | None
+    claim: str
+    quote: str
+    source_title: str
+    source_url: str
+    researched_at: datetime
+    is_stale: bool
+
+
+class CompanyArchiveSourceRead(BaseModel):
+    research_run_id: UUID
+    job_id: UUID
+    job_title: str | None
+    source_id: str
+    title: str
+    url: str
+    excerpt: str
+    age: str | None
+    researched_at: datetime
+    is_stale: bool
+
+
+class CompanyArchiveRead(BaseModel):
+    id: UUID
+    name: str
+    industry: str | None
+    website_url: str | None
+    recruitment_url: str | None
+    notes: str | None
+    batches: list[str]
+    jobs: list[CompanyArchiveJobRead]
+    research_summary: str
+    research_count: int
+    finding_count: int
+    source_count: int
+    last_researched_at: datetime | None
+    stale_research_count: int
+    no_evidence: bool
+    findings: list[CompanyArchiveFindingRead]
+    sources: list[CompanyArchiveSourceRead]
+
+
 SkillId = Literal[
     "job_analysis",
     "resume_targeting",
