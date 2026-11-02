@@ -428,3 +428,22 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 
 - 后端 `.venv/bin/pytest -o addopts='' -q tests/test_account_data_controls.py`：3 项通过，覆盖导出用户隔离及简历原件、错误邮箱/密码阻止删除、成功删除全部用户表记录/RAG 片段/私有文件并清除 Cookie。
 - `.venv/bin/python -m compileall -q app tests`、FastAPI OpenAPI 路由检查、前端 `bun run typecheck` 和 `git diff --check` 通过。未运行完整后端回归、浏览器端到端或生产数据库联调。
+
+## PRD 页面模块：求职仪表盘
+
+### 完成内容
+
+- 将 `/dashboard` 从仅显示账户问候和静态提示的页面改为登录后的账户仪表盘；数据全部来自 `GET /api/v1/dashboard`，未登录或服务错误时显示可操作的错误提示，不用演示数据填充个人工作区。
+- 展示最近更新的进行中投递阶段及阶段数量。当前阶段取当前用户最近更新、且尚未结束的 Application；已接受/拒绝/撤回/关闭的投递不覆盖当前进行阶段。
+- 汇总当前时区下未来 7 天的提醒与投递跟进、未来 14 天的岗位截止时间，以及最近 5 条 AgentRun。每个列表有对应页面入口；接口只返回展示所需字段，不返回 Agent 的输入原文、模型结果或错误正文。
+- 查询对 Application、Reminder、JobPosting、Company 和 AgentRun 均限制当前用户；时间窗口按用户 IANA 时区确定。没有创建新表或迁移，不调用模型/搜索服务。
+- 仪表盘导航增加页面内快捷入口；README 增加汇总 API 说明。
+
+### 技术与上一模块的区别
+
+上一模块提供数据导出和账户删除；本次读取多个已有业务模块并组合成一个只读 dashboard API。后端用 SQLAlchemy 聚合投递阶段，并用用户归属条件联查岗位/公司；前端用 TypeScript 响应类型和用户时区格式化时间，保留各模块原有的写入和确认边界。
+
+### 验证
+
+- 后端 `.venv/bin/pytest -o addopts='' -q tests/test_dashboard.py`：2 项通过，覆盖投递阶段、提醒/跟进、截止日期和 Agent 运行聚合，以及用户间数据隔离。
+- `.venv/bin/python -m compileall -q app tests`、FastAPI OpenAPI 路由检查、前端 `bun run typecheck` 和 `git diff --check` 通过。未运行浏览器端到端或 PostgreSQL/Redis Compose 联调。

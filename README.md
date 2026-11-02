@@ -179,6 +179,7 @@ uv run scripts/check_agent_job_visibility.py
 - `POST /api/v1/auth/login`：登录。
 - `POST /api/v1/auth/logout`：退出并清理会话。
 - `GET /api/v1/auth/me`：获取当前账户。
+- `GET /api/v1/dashboard`：按当前账户汇总投递阶段、未来 7 天提醒/跟进、未来 14 天岗位截止日期和最近 5 条 Agent 运行记录。
 - `PUT /api/v1/auth/me/timezone`：更新账户 IANA 时区；必须显式确认重新计算所有未来提醒。
 - `GET /api/v1/account/export`：下载当前账户的 ZIP 数据包，包含账户资料、业务记录、解析后的简历文本和服务器仍保存的简历原件；不包含密码哈希、服务 API 密钥或派生向量数值。
 - `DELETE /api/v1/account/me`：永久删除当前账户及其业务记录、向量索引和账户文件；需要再次提交当前密码和账户邮箱。

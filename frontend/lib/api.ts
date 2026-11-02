@@ -44,6 +44,46 @@ export const APPLICATION_STAGE_LABELS: Record<ApplicationStage, string> = {
   closed: "已关闭",
 };
 
+export type DashboardSummary = {
+  email: string;
+  timezone: string;
+  today: string;
+  current_stage: {
+    status: ApplicationStage;
+    job_id: string;
+    job_label: string;
+    updated_at: string;
+  } | null;
+  stage_counts: { status: ApplicationStage; count: number }[];
+  upcoming_tasks: {
+    id: string;
+    kind: "reminder" | "application_follow_up";
+    title: string;
+    due_at: string | null;
+    due_date: string | null;
+    timezone: string;
+    status: string;
+    job_id: string | null;
+    job_label: string | null;
+  }[];
+  approaching_deadlines: {
+    job_id: string;
+    job_label: string;
+    deadline: string;
+    days_remaining: number;
+    application_status: ApplicationStage | null;
+  }[];
+  recent_agent_runs: {
+    id: string;
+    task_type: string;
+    status: string;
+    created_at: string;
+    finished_at: string | null;
+    job_id: string | null;
+    job_label: string | null;
+  }[];
+};
+
 export type Application = {
   id: string;
   status: ApplicationStage;

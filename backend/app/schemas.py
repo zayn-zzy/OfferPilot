@@ -98,6 +98,71 @@ class HealthRead(BaseModel):
     database: str
 
 
+class DashboardCurrentStageRead(BaseModel):
+    """Most recently updated active application stage."""
+
+    status: ApplicationStage
+    job_id: UUID
+    job_label: str
+    updated_at: datetime
+
+
+class DashboardStageCountRead(BaseModel):
+    """Number of applications currently in one pipeline stage."""
+
+    status: ApplicationStage
+    count: int
+
+
+class DashboardTaskRead(BaseModel):
+    """A near-term user follow-up or scheduled reminder."""
+
+    id: UUID
+    kind: Literal["reminder", "application_follow_up"]
+    title: str
+    due_at: datetime | None = None
+    due_date: date | None = None
+    timezone: str
+    status: str
+    job_id: UUID | None
+    job_label: str | None
+
+
+class DashboardDeadlineRead(BaseModel):
+    """A saved job deadline approaching within the dashboard window."""
+
+    job_id: UUID
+    job_label: str
+    deadline: date
+    days_remaining: int
+    application_status: ApplicationStage | None
+
+
+class DashboardAgentRunRead(BaseModel):
+    """Recent Agent activity without its prompt or result payload."""
+
+    id: UUID
+    task_type: str
+    status: str
+    created_at: datetime
+    finished_at: datetime | None
+    job_id: UUID | None
+    job_label: str | None
+
+
+class DashboardRead(BaseModel):
+    """Private, owner-scoped data needed by the job-search dashboard."""
+
+    email: EmailStr
+    timezone: str
+    today: date
+    current_stage: DashboardCurrentStageRead | None
+    stage_counts: list[DashboardStageCountRead]
+    upcoming_tasks: list[DashboardTaskRead]
+    approaching_deadlines: list[DashboardDeadlineRead]
+    recent_agent_runs: list[DashboardAgentRunRead]
+
+
 class CandidateProfileWrite(BaseModel):
     """Editable fields in a candidate's private profile."""
 

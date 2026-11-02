@@ -72,6 +72,54 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .dashboard-shell { background: radial-gradient(ellipse at 50% 0, #e4f2e9 0, var(--canvas) 42%); }
 .dashboard-topbar { max-width: 1000px; border-bottom: 1px solid #dce7df; }
 .dashboard-actions { display: flex; align-items: center; gap: 22px; }
+.dashboard-page { min-height: 100vh; padding-bottom: 70px; }
+.dashboard-page-topbar { max-width: 1280px; }
+.dashboard-page-topbar .dashboard-actions { max-width: calc(100% - 180px); gap: 16px; }
+.dashboard-page-topbar .dashboard-actions > * { flex: 0 0 auto; font-size: 12px; }
+.dashboard-page-welcome { max-width: 1120px; margin: 38px auto 26px; }
+.dashboard-page-welcome .eyebrow { margin-bottom: 9px; }
+.dashboard-page-welcome h1 { font-size: clamp(27px, 3.5vw, 37px); }
+.dashboard-page-welcome > p:last-child { margin-top: 8px; }
+.dashboard-top-grid, .dashboard-content-grid { max-width: 1120px; margin: 16px auto; padding: 0 24px; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr); gap: 16px; }
+.dashboard-content-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; margin-top: 16px; }
+.dashboard-panel { min-width: 0; padding: 21px; border: 1px solid var(--line); border-radius: 15px; background: #fff; box-shadow: 0 14px 40px #244b3808; }
+.dashboard-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dashboard-section-heading .eyebrow, .dashboard-quick-panel .eyebrow { margin-bottom: 6px; }
+.dashboard-section-heading h2, .dashboard-quick-panel h2 { margin: 0; font-size: 17px; letter-spacing: -.02em; }
+.dashboard-section-heading > .text-link { flex: 0 0 auto; font-size: 11px; }
+.dashboard-current-stage { margin-top: 18px; display: grid; gap: 6px; }
+.dashboard-current-stage > span { color: var(--teal); font-size: 12px; font-weight: 700; }
+.dashboard-current-stage > strong { font-size: 16px; }
+.dashboard-current-stage > small { color: var(--muted); font-size: 11px; }
+.dashboard-stage-counts { margin-top: 18px; padding-top: 13px; display: flex; flex-wrap: wrap; gap: 7px; border-top: 1px solid #edf1ed; }
+.dashboard-stage-counts > span { padding: 6px 9px; border-radius: 8px; color: #50635b; background: #f2f6f3; font-size: 10px; }
+.dashboard-stage-counts strong { margin-left: 4px; color: var(--ink); }
+.dashboard-stage-counts > small, .dashboard-empty-inline p { color: var(--muted); font-size: 11px; }
+.dashboard-empty-inline { margin-top: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.dashboard-empty-inline p { margin: 0; }
+.dashboard-empty-inline a, .dashboard-empty-state a, .dashboard-subtle-link { color: var(--teal); font-size: 11px; font-weight: 700; }
+.dashboard-quick-links { margin-top: 15px; display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.dashboard-quick-links .button { min-height: 39px; padding: 0 13px; font-size: 11px; }
+.dashboard-quick-links .dashboard-subtle-link { flex-basis: 100%; margin-top: 2px; }
+.dashboard-list { margin: 15px 0 0; padding: 0; list-style: none; }
+.dashboard-list li { min-height: 65px; padding: 10px 0; display: flex; align-items: center; gap: 11px; border-top: 1px solid #edf1ed; }
+.dashboard-list-main { min-width: 0; flex: 1; display: grid; gap: 4px; }
+.dashboard-list-main strong { overflow: hidden; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.dashboard-list-main small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.dashboard-list-marker, .dashboard-deadline-days, .dashboard-run-status { min-width: 43px; padding: 6px 7px; border-radius: 7px; color: #38675d; background: #edf6f0; text-align: center; font-size: 9px; font-weight: 700; }
+.dashboard-deadline-days { color: #8a6129; background: #fbf3e5; }
+.dashboard-list-link { flex: 0 0 auto; color: var(--teal); font-size: 10px; font-weight: 700; }
+.dashboard-empty-state { padding: 18px 0 2px; }
+.dashboard-empty-state p { margin: 0 0 8px; color: var(--muted); font-size: 11px; }
+.dashboard-agent-panel { max-width: 1072px; margin: 16px auto; }
+.dashboard-run-failed { color: #983c3c; background: #fff0ed; }
+.dashboard-run-running, .dashboard-run-queued { color: #8a6129; background: #fbf3e5; }
+.dashboard-run-cancelled { color: #65746d; background: #f0f2f0; }
+.dashboard-error, .dashboard-load-error { max-width: 1072px; margin: 16px auto; padding: 13px 16px; border-radius: 10px; color: #983c3c; background: #fff0ed; font-size: 12px; }
+.dashboard-load-error { margin-top: 50px; padding: 26px; display: grid; justify-items: start; gap: 12px; }
+.dashboard-load-error p { margin: 0; }
+.dashboard-login-hint { max-width: 1072px; margin: 10px auto; color: #983c3c; font-size: 12px; }
+.dashboard-login-hint a { font-weight: 700; text-decoration: underline; }
 .settings-shell { min-height: 100vh; padding-bottom: 70px; background: radial-gradient(ellipse at 50% 0, #e4f2e9 0, var(--canvas) 38%); }
 .settings-topbar { margin-bottom: 48px; }
 .settings-heading { max-width: 900px; margin: 0 auto 28px; padding: 0 24px; }
@@ -258,6 +306,13 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .agent-planner-footnote { max-width: 900px; margin: 15px auto; padding: 0 24px; }
 
 @media (max-width: 700px) {
+  .dashboard-page-topbar { overflow: hidden; }
+  .dashboard-page-topbar .dashboard-actions { max-width: 70vw; overflow-x: auto; gap: 13px; }
+  .dashboard-page-topbar .dashboard-actions > * { flex: 0 0 auto; font-size: 11px; }
+  .dashboard-top-grid, .dashboard-content-grid { grid-template-columns: 1fr; margin: 12px auto; padding: 0 14px; }
+  .dashboard-page-welcome { margin: 36px auto 22px; }
+  .dashboard-agent-panel, .dashboard-error, .dashboard-load-error, .dashboard-login-hint { margin-right: 14px; margin-left: 14px; }
+  .dashboard-panel { padding: 18px; }
   .settings-topbar { overflow: hidden; }
   .settings-topbar .dashboard-actions { max-width: 70vw; overflow-x: auto; gap: 13px; }
   .settings-topbar .dashboard-actions > * { flex: 0 0 auto; font-size: 11px; }
