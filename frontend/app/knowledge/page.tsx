@@ -113,6 +113,7 @@ export default function KnowledgePage() {
           <Link className="text-link" href="/dashboard">工作台</Link>
           <Link className="text-link" href="/profile">个人档案</Link>
           <Link className="text-link" href="/jobs">岗位管理</Link>
+          <Link className="text-link" href="/skills">Agent Skills</Link>
         </nav>
       </header>
 

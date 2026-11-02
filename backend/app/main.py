@@ -31,6 +31,7 @@ from app.routes.research import router as research_router
 from app.routes.reminders import router as reminders_router
 from app.routes.reminders import notifications_router
 from app.routes.resumes import router as resumes_router
+from app.routes.skills import router as skills_router
 from app.schemas import HealthRead
 from app.services.job_extraction import (
     JobExtractionProvider,
@@ -49,6 +50,7 @@ from app.services.company_research import (
     PublicSearchProvider,
     create_company_research_mcp_server,
 )
+from app.services.skills import SkillProvider, OpenAICompatibleSkillProvider
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +72,7 @@ def create_app(
     knowledge_answer_provider: KnowledgeAnswerProvider | None = None,
     company_research_search_provider: PublicSearchProvider | None = None,
     company_research_summarizer: CompanyResearchSummaryProvider | None = None,
+    skill_provider: SkillProvider | None = None,
 ) -> FastAPI:
     """Create an app instance, optionally injecting test settings and a database."""
 
@@ -130,6 +133,7 @@ def create_app(
     app.state.company_research_summarizer = (
         company_research_summarizer or OpenAICompatibleCompanyResearchSummarizer()
     )
+    app.state.skill_provider = skill_provider or OpenAICompatibleSkillProvider()
     app.state.company_research_mcp_server = create_company_research_mcp_server(
         app_settings, search_provider
     )
@@ -170,6 +174,7 @@ def create_app(
     app.include_router(research_router, prefix="/api/v1")
     app.include_router(reminders_router, prefix="/api/v1")
     app.include_router(notifications_router, prefix="/api/v1")
+    app.include_router(skills_router, prefix="/api/v1")
 
     @app.get("/health", response_model=HealthRead, tags=["system"])
     def health(

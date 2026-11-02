@@ -32,6 +32,7 @@ export default function DashboardPage() {
         <div className="dashboard-actions">
           <Link className="text-link" href="/profile">个人档案</Link>
           <Link className="text-link" href="/knowledge">资料问答</Link>
+          <Link className="text-link" href="/skills">Agent Skills</Link>
           <Link className="text-link" href="/jobs">岗位管理</Link>
           <Link className="text-link" href="/reminders">提醒中心</Link>
           <button className="text-button" onClick={logout} type="button">退出登录</button>

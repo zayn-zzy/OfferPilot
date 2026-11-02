@@ -90,10 +90,22 @@ async def test_upgrade_existing_profile_database_preserves_data_and_enables_jobs
                 "application_status_events",
                 "reminders",
                 "notifications",
+                "approval_requests",
+                "application_prep_packs",
+                "audit_events",
             }.issubset(inspect(engine).get_table_names())
             assert "timezone" in {
                 column["name"] for column in inspect(engine).get_columns("users")
             }
+            assert {
+                "skill_id",
+                "skill_version",
+                "idempotency_key",
+                "request_hash",
+                "resume_version_id",
+            }.issubset(
+                {column["name"] for column in inspect(engine).get_columns("agent_runs")}
+            )
             with engine.connect() as connection:
                 assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
                     ScriptDirectory.from_config(migration_config).get_current_head()

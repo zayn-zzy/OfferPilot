@@ -286,6 +286,96 @@ export type JobSourceEvidence = {
   captured_at: string;
 };
 
+export type SkillId =
+  | "job_analysis"
+  | "resume_targeting"
+  | "application_answers"
+  | "company_research"
+  | "interview_prep"
+  | "application_prep_pack";
+
+export type SkillCatalogItem = {
+  id: SkillId;
+  version: string;
+  name: string;
+  description: string;
+  inputs: Record<string, unknown>;
+  outputs: Record<string, unknown>;
+  boundaries: string[];
+  example_input: Record<string, unknown>;
+  example_output: Record<string, unknown>;
+};
+
+export type SkillCitation = {
+  source_id: string;
+  source_label: string;
+  source_url: string | null;
+  quote: string;
+};
+
+export type SkillDraft = {
+  summary: string;
+  checklist: { title: string; reason: string; needs_user_confirmation: boolean }[];
+  sections: {
+    title: string;
+    content: string;
+    citations: SkillCitation[];
+    needs_user_input: boolean;
+  }[];
+  open_questions: string[];
+  warnings: string[];
+};
+
+export type SkillRun = {
+  id: string;
+  skill_id: SkillId;
+  skill_version: string;
+  job_id: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  result: SkillDraft | null;
+  events: { id: number; event: string; message: string; created_at: string; step?: string }[];
+  error_code: string | null;
+  error_message: string | null;
+  model_name: string | null;
+  attempt_count: number;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+};
+
+export type SkillApproval = {
+  id: string;
+  agent_run_id: string;
+  job_id: string;
+  action_type: string;
+  summary: string;
+  status: "pending" | "approved" | "rejected" | "expired" | "executed" | "invalidated";
+  expires_at: string;
+  approved_at: string | null;
+  executed_at: string | null;
+  created_at: string;
+};
+
+export type ApplicationPrepPack = {
+  id: string;
+  job_id: string;
+  agent_run_id: string;
+  skill_id: SkillId;
+  skill_version: string;
+  content: SkillDraft;
+  created_at: string;
+};
+
+export type SkillAuditEvent = {
+  id: string;
+  approval_id: string | null;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  details: Record<string, unknown>;
+  created_at: string;
+};
+
 export async function apiRequest<T = void>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   if (typeof options.body === "string" && !headers.has("Content-Type")) {
@@ -333,6 +423,7 @@ export async function apiRequest<T = void>(path: string, options: RequestInit = 
         providerCode.startsWith("embedding_")
         || providerCode.startsWith("answer_")
         || providerCode.startsWith("research_")
+      || providerCode.startsWith("skill_")
       );
     const message = response.status >= 500 && !hasMigrationHint && !safeProviderFailure
       ? `后端返回 HTTP ${response.status}，请检查 API 服务日志。`

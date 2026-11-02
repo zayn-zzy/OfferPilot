@@ -567,6 +567,144 @@ class CompanyResearchRead(BaseModel):
     warning: str | None = None
 
 
+SkillId = Literal[
+    "job_analysis",
+    "resume_targeting",
+    "application_answers",
+    "company_research",
+    "interview_prep",
+    "application_prep_pack",
+]
+SkillRunStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
+ApprovalStatus = Literal[
+    "pending", "approved", "rejected", "expired", "executed", "invalidated"
+]
+
+
+class SkillCatalogItem(BaseModel):
+    id: SkillId
+    version: str
+    name: str
+    description: str
+    inputs: dict[str, object]
+    outputs: dict[str, object]
+    boundaries: list[str]
+    example_input: dict[str, object]
+    example_output: dict[str, object]
+
+
+class SkillRunCreate(BaseModel):
+    skill_id: SkillId
+    job_id: UUID
+    questions: list[str] = Field(default_factory=list, max_length=8)
+    idempotency_key: str = Field(min_length=16, max_length=128)
+
+    @field_validator("questions")
+    @classmethod
+    def normalize_questions(cls, values: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for value in values:
+            question = value.strip()
+            if not question:
+                continue
+            if len(question) > 2000:
+                raise ValueError("每个申请问题不能超过 2000 个字符")
+            normalized.append(question)
+        if len(normalized) > 8:
+            raise ValueError("最多提供 8 个申请问题")
+        return normalized
+
+    @model_validator(mode="after")
+    def require_questions_for_answer_drafts(self) -> "SkillRunCreate":
+        if self.skill_id == "application_answers" and not self.questions:
+            raise ValueError("生成申请问答草稿时至少提供一个真实申请问题")
+        return self
+
+
+class SkillCitationRead(BaseModel):
+    source_id: str
+    source_label: str
+    source_url: str | None = None
+    quote: str
+
+
+class SkillChecklistItemRead(BaseModel):
+    title: str
+    reason: str
+    needs_user_confirmation: bool = True
+
+
+class SkillDraftSectionRead(BaseModel):
+    title: str
+    content: str
+    citations: list[SkillCitationRead] = Field(default_factory=list)
+    needs_user_input: bool = False
+
+
+class SkillDraftRead(BaseModel):
+    summary: str
+    checklist: list[SkillChecklistItemRead] = Field(default_factory=list)
+    sections: list[SkillDraftSectionRead] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class SkillRunRead(BaseModel):
+    id: UUID
+    skill_id: SkillId
+    skill_version: str
+    job_id: UUID
+    status: SkillRunStatus
+    result: SkillDraftRead | None
+    events: list[dict[str, object]]
+    error_code: str | None
+    error_message: str | None
+    model_name: str | None
+    attempt_count: int
+    created_at: datetime
+    updated_at: datetime
+    finished_at: datetime | None
+
+
+class ApprovalRequestRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    agent_run_id: UUID
+    job_id: UUID
+    action_type: str
+    summary: str
+    status: ApprovalStatus
+    expires_at: datetime
+    approved_at: datetime | None
+    executed_at: datetime | None
+    created_at: datetime
+
+
+class ApplicationPrepPackRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    job_id: UUID
+    agent_run_id: UUID
+    skill_id: SkillId
+    skill_version: str
+    content: SkillDraftRead
+    created_at: datetime
+
+
+class AuditEventRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    approval_id: UUID | None
+    action: str
+    entity_type: str
+    entity_id: str
+    details: dict[str, object]
+    created_at: datetime
+
+
 ReminderKind = Literal["opening", "deadline", "assessment", "interview", "follow_up", "other"]
 ReminderStatus = Literal["scheduled", "paused", "notified", "completed", "cancelled", "failed"]
 

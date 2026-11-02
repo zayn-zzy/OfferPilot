@@ -7,11 +7,19 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.models import DocumentChunk, ResumeVersion, User
+from app.models import (
+    AgentRun,
+    ApplicationPrepPack,
+    ApprovalRequest,
+    AuditEvent,
+    DocumentChunk,
+    ResumeVersion,
+    User,
+)
 from app.routes.auth import (
     current_user_dependency,
     enforce_same_origin,
@@ -248,6 +256,38 @@ def delete_resume(
             DocumentChunk.source_id == resume.id,
         )
     )
+    skill_runs = session.scalars(
+        select(AgentRun).where(
+            AgentRun.user_id == user.id,
+            AgentRun.task_type == "skill_workflow",
+            AgentRun.resume_version_id == resume.id,
+        )
+    ).all()
+    for run in skill_runs:
+        approval_ids = list(
+            session.scalars(
+                select(ApprovalRequest.id).where(
+                    ApprovalRequest.user_id == user.id,
+                    ApprovalRequest.agent_run_id == run.id,
+                )
+            ).all()
+        )
+        if approval_ids:
+            session.execute(
+                update(AuditEvent)
+                .where(AuditEvent.approval_id.in_(approval_ids))
+                .values(approval_id=None)
+            )
+            session.execute(
+                delete(ApprovalRequest).where(ApprovalRequest.id.in_(approval_ids))
+            )
+        session.execute(
+            delete(ApplicationPrepPack).where(
+                ApplicationPrepPack.user_id == user.id,
+                ApplicationPrepPack.agent_run_id == run.id,
+            )
+        )
+        session.delete(run)
     if resume.storage_key:
         storage_root = settings.storage_dir.resolve()
         file_path = (storage_root / resume.storage_key).resolve()

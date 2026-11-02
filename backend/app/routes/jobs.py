@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import Response
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import String, cast, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -16,7 +16,10 @@ from app.core.config import Settings
 from app.models import (
     AgentRun,
     Application,
+    ApplicationPrepPack,
     ApplicationStatusEvent,
+    ApprovalRequest,
+    AuditEvent,
     Company,
     JobSourceEvidence,
     JobPosting,
@@ -610,10 +613,39 @@ def delete_job(
         JobSourceEvidence.job_id == job.id,
         JobSourceEvidence.user_id == user.id,
     ).delete(synchronize_session=False)
-    session.query(AgentRun).filter(
-        AgentRun.job_id == job.id,
-        AgentRun.user_id == user.id,
-    ).delete(synchronize_session=False)
+    run_ids = list(
+        session.scalars(
+            select(AgentRun.id).where(
+                AgentRun.job_id == job.id,
+                AgentRun.user_id == user.id,
+            )
+        ).all()
+    )
+    if run_ids:
+        approval_ids = list(
+            session.scalars(
+                select(ApprovalRequest.id).where(
+                    ApprovalRequest.user_id == user.id,
+                    ApprovalRequest.agent_run_id.in_(run_ids),
+                )
+            ).all()
+        )
+        if approval_ids:
+            session.execute(
+                update(AuditEvent)
+                .where(AuditEvent.approval_id.in_(approval_ids))
+                .values(approval_id=None)
+            )
+            session.execute(
+                delete(ApprovalRequest).where(ApprovalRequest.id.in_(approval_ids))
+            )
+        session.execute(
+            delete(ApplicationPrepPack).where(
+                ApplicationPrepPack.user_id == user.id,
+                ApplicationPrepPack.agent_run_id.in_(run_ids),
+            )
+        )
+        session.execute(delete(AgentRun).where(AgentRun.id.in_(run_ids)))
     session.delete(job)
     session.commit()
     return None
