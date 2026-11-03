@@ -121,6 +121,8 @@ uv run alembic upgrade head
 
 `application_prep_pack` 在人工审批节点暂停；用户批准后，执行 API 使用同一 `thread_id` 恢复图，再次校验审批有效期、岗位归属和草稿哈希后才保存。API 重启时，尚未完成的 `queued/running` 任务会标记失败并允许手动重试；审批暂停状态和检查点可留存以供恢复。FastAPI `BackgroundTasks` 仍不是持久任务队列，提醒投递仍由独立 Celery Worker/Beat 负责。
 
+统一 Agent 路由会在每次执行后将请求 ID、总耗时、外部模型/搜索调用耗时、服务返回的 token 用量和费用估算写入 `AgentRun` 事件；API 响应也包含 `X-Request-ID`，Agent 工作区汇总显示可确认的耗时、token 和费用。统计只记录 Provider、模型、操作、状态与计量值，不保存 HTTP 请求/响应正文。要估算费用，需按当前服务商价格配置 `OFFERPILOT_LLM_INPUT_USD_PER_MILLION_TOKENS`、`OFFERPILOT_LLM_OUTPUT_USD_PER_MILLION_TOKENS`、`OFFERPILOT_EMBEDDING_INPUT_USD_PER_MILLION_TOKENS` 和 `OFFERPILOT_TAVILY_USD_PER_SEARCH`；未配置费率或服务未返回 token 用量时会显示估算不完整，不会把未知成本显示为零。
+
 ### 公司档案
 
 登录后访问 `/companies` 可按公司查看已保存岗位、招聘批次、个人公司备注和每个岗位最新一次成功的公开研究。研究结论保留引用片段与来源链接；超过 7 天的结果会标出可能过期，缺少支持证据时会说明。可在公司档案中对具体岗位发起或刷新研究；搜索服务沿用 `OFFERPILOT_TAVILY_API_KEY`，摘要沿用现有 Chat Completions 配置。该页面读取按账户隔离的公司、岗位和 `AgentRun` 研究记录，不新增数据库表；公司备注是个人记录，公开结论仍需通过来源链接核验。

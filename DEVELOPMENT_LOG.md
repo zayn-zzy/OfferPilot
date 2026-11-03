@@ -554,3 +554,22 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 - `backend/.venv/bin/pytest -o addopts='' -q tests/test_agent_workflow.py`：8 项通过；新增用例覆盖成功结果、阶段记录、工作区展示、跨用户岗位访问拒绝和未确认简历的失败记录。
 - RAG/匹配相关的文本切块与 PostgreSQL 向量查询编译定向测试：2 项通过。
 - `backend/.venv/bin/python -m compileall -q app tests`、前端 `bun run typecheck` 和 `git diff --check` 通过。使用 SQLite 测试库，未运行真实 PostgreSQL/Redis Compose 或浏览器端到端验证。
+
+## PRD §7.3：Agent 执行耗时、Provider 用量与费用估算
+
+### 完成内容
+
+- 统一 Agent 路由为每次派发记录执行耗时和 request ID；API 响应增加 `X-Request-ID`。HTTP Provider 观测记录 Chat Completions、Embeddings、Tavily 调用耗时、操作、模型和成功/失败状态。
+- 从 Provider 响应中的 usage 元数据汇总 prompt/completion/total tokens。可配置模型输入/输出、Embedding 和 Tavily 单次搜索费率，按配置估算费用；缺少 token 用量或费率时显式标为估算不完整，不把未知数当成零。
+- 在 Agent 工作区显示完整可确认的任务耗时、Token 数和费用估算；每次尝试的 Provider 明细保存在 `AgentRun.events` 中。
+- 观测层不持久化请求/响应正文、Authorization Header 或搜索查询；利用现有 JSON 事件存储，没有新增数据库列或迁移。
+
+### 技术与上一模块的区别
+
+上一模块让岗位匹配进入统一任务路由并保存执行状态；本次为所有统一路由增加共用的计量钩子。HTTPX transport/response hook 在不改变各 Provider 返回契约的情况下捕获调用时间和 usage，ContextVar 将这些数据限制到当前 request/run，工作区只暴露聚合值。
+
+### 验证
+
+- `tests/test_agent_telemetry.py tests/test_agent_workflow.py tests/test_agent_workspace.py`：14 项通过，覆盖 request ID 绑定、Chat/Embedding/Tavily 计量、传输失败记录、正文不落库、任务事件持久化和工作区汇总。
+- `tests/test_task_planner.py tests/test_skills.py`：16 项通过；岗位抽取、Embedding、Tavily 与公司摘要 Provider 定向回归：8 项通过。
+- Python `compileall`、前端 `bun run typecheck`、`git diff --check` 通过。未调用真实服务；费率需由使用者按当前服务商价格配置，估算不替代账单。

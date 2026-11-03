@@ -192,6 +192,49 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+def _run_telemetry_summary(events: list[dict]) -> dict[str, int | float | None]:
+    attempts = [
+        event.get("metrics")
+        for event in events
+        if event.get("step") == "telemetry" and isinstance(event.get("metrics"), dict)
+    ]
+    if not attempts:
+        return {"duration_ms": None, "total_tokens": None, "estimated_cost_usd": None}
+
+    durations = [item.get("duration_ms") for item in attempts]
+    duration_ms = (
+        sum(value for value in durations if isinstance(value, int) and not isinstance(value, bool))
+        if all(isinstance(value, int) and not isinstance(value, bool) for value in durations)
+        else None
+    )
+    token_values = [item.get("total_tokens") for item in attempts]
+    total_tokens = (
+        sum(value for value in token_values if isinstance(value, int) and not isinstance(value, bool))
+        if all(
+            item.get("token_usage_complete") is True
+            and isinstance(item.get("total_tokens"), int)
+            and not isinstance(item.get("total_tokens"), bool)
+            for item in attempts
+        )
+        else None
+    )
+    cost_values = [item.get("estimated_cost_usd") for item in attempts]
+    estimated_cost_usd = (
+        sum(float(value) for value in cost_values if isinstance(value, (int, float)))
+        if all(
+            item.get("cost_estimate_complete") is True
+            and isinstance(item.get("estimated_cost_usd"), (int, float))
+            for item in attempts
+        )
+        else None
+    )
+    return {
+        "duration_ms": duration_ms,
+        "total_tokens": total_tokens,
+        "estimated_cost_usd": estimated_cost_usd,
+    }
+
+
 def _task_plan_read(run: AgentRun) -> AgentTaskPlanRead:
     result = run.result or {}
     preview_data = result.get("preview")
@@ -250,6 +293,7 @@ def read_agent_workspace(
                 if job
                 else None
             ),
+            **_run_telemetry_summary(list(run.events or [])),
         )
         for run, job, company_name in runs
     ]

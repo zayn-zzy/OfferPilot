@@ -343,12 +343,36 @@ export type ExtractedJobField = {
 
 export type AgentTaskEvent = {
   id: number;
-  event: "progress" | "completed" | "failed" | "confirmed";
+  event: "progress" | "completed" | "failed" | "confirmed" | "telemetry";
   message: string;
   step?: string;
   code?: string;
   needs_review_count?: number;
   created_at: string;
+  metrics?: {
+    run_id: string;
+    request_id: string | null;
+    attempt: number;
+    duration_ms: number;
+    provider_call_count: number;
+    prompt_tokens: number | null;
+    completion_tokens: number | null;
+    total_tokens: number | null;
+    token_usage_complete: boolean;
+    estimated_cost_usd: number | null;
+    cost_estimate_complete: boolean;
+    calls: {
+      provider: string;
+      operation: string;
+      model: string | null;
+      duration_ms: number;
+      outcome: string;
+      prompt_tokens: number | null;
+      completion_tokens: number | null;
+      total_tokens: number | null;
+      estimated_cost_usd: number | null;
+    }[];
+  };
 };
 
 export type AgentTask = {
@@ -423,6 +447,9 @@ export type AgentWorkspaceRun = {
   finished_at: string | null;
   job_id: string | null;
   job_label: string | null;
+  duration_ms: number | null;
+  total_tokens: number | null;
+  estimated_cost_usd: number | null;
 };
 
 export type AgentWorkspace = {

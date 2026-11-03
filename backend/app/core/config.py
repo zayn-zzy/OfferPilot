@@ -16,6 +16,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        env_ignore_empty=True,
     )
 
     environment: Literal["development", "test", "production"] = "development"
@@ -30,10 +31,16 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="", max_length=120)
     llm_timeout_seconds: float = Field(default=30.0, gt=0, le=180)
     llm_low_confidence_threshold: float = Field(default=0.75, ge=0, le=1)
+    llm_input_usd_per_million_tokens: float | None = Field(default=None, ge=0, le=100_000)
+    llm_output_usd_per_million_tokens: float | None = Field(default=None, ge=0, le=100_000)
     embedding_base_url: str = ""
     embedding_api_key: SecretStr = SecretStr("")
     embedding_model: str = Field(default="", max_length=120)
+    embedding_input_usd_per_million_tokens: float | None = Field(
+        default=None, ge=0, le=100_000
+    )
     tavily_api_key: SecretStr = SecretStr("")
+    tavily_usd_per_search: float | None = Field(default=None, ge=0, le=1_000)
     research_timeout_seconds: float = Field(default=12.0, gt=0, le=60)
     celery_broker_url: str = "redis://localhost:6379/0"
 

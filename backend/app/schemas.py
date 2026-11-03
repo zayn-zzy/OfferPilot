@@ -503,6 +503,9 @@ class AgentWorkspaceRunRead(BaseModel):
     finished_at: datetime | None
     job_id: UUID | None
     job_label: str | None
+    duration_ms: int | None
+    total_tokens: int | None
+    estimated_cost_usd: float | None
 
 
 class AgentWorkspaceRead(BaseModel):

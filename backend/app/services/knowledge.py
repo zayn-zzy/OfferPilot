@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.models import DocumentChunk
+from app.services.agent_telemetry import observed_async_client
 
 MAX_EMBEDDING_DIMENSIONS = 16_000
 CHUNK_SIZE = 900
@@ -88,8 +89,8 @@ class OpenAICompatibleEmbeddingProvider:
         output: list[list[float] | None] = [None] * len(texts)
         embedding_dimensions: int | None = None
         try:
-            async with httpx.AsyncClient(
-                timeout=settings.llm_timeout_seconds, transport=self._transport
+            async with observed_async_client(
+                settings, timeout=settings.llm_timeout_seconds, transport=self._transport
             ) as client:
                 for start in range(0, len(texts), EMBEDDING_BATCH_SIZE):
                     batch = texts[start : start + EMBEDDING_BATCH_SIZE]
@@ -193,8 +194,8 @@ class OpenAICompatibleKnowledgeAnswerProvider:
             ],
         }
         try:
-            async with httpx.AsyncClient(
-                timeout=settings.llm_timeout_seconds, transport=self._transport
+            async with observed_async_client(
+                settings, timeout=settings.llm_timeout_seconds, transport=self._transport
             ) as client:
                 response = await client.post(
                     _endpoint(settings.llm_base_url, "chat/completions"),

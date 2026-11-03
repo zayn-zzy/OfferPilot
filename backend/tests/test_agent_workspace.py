@@ -76,7 +76,19 @@ def workspace_context() -> Generator[dict[str, object], None, None]:
             status="succeeded",
             input_text="private owner prompt",
             result={"private": "model result"},
-            events=[],
+            events=[
+                {
+                    "event": "telemetry",
+                    "step": "telemetry",
+                    "metrics": {
+                        "duration_ms": 125,
+                        "total_tokens": 72,
+                        "token_usage_complete": True,
+                        "estimated_cost_usd": 0.00012,
+                        "cost_estimate_complete": True,
+                    },
+                }
+            ],
             created_at=now,
             updated_at=now,
             finished_at=now,
@@ -127,6 +139,9 @@ def test_workspace_lists_supported_workflows_and_owner_runs(
     run = workspace.recent_runs[0]
     assert run.task_type == "skill_workflow"
     assert run.job_label == "星河科技 · 后端工程师"
+    assert run.duration_ms == 125
+    assert run.total_tokens == 72
+    assert run.estimated_cost_usd == pytest.approx(0.00012)
     assert "input_text" not in run.model_dump()
     assert "result" not in run.model_dump()
 

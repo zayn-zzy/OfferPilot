@@ -1,6 +1,7 @@
 """Top-level LangGraph router for persisted Agent workflows."""
 
 from collections.abc import Awaitable, Callable, Mapping
+import logging
 from typing import Literal, TypedDict
 from uuid import UUID
 
@@ -9,6 +10,9 @@ from langgraph.graph import END, START, StateGraph
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import AgentRun, ApprovalRequest, utc_now
+from app.services.agent_telemetry import AgentRunTelemetry, capture_agent_run
+
+logger = logging.getLogger(__name__)
 
 AgentWorkflowType = Literal[
     "company_research",
@@ -45,6 +49,46 @@ class AgentWorkflowState(TypedDict, total=False):
 WorkflowHandler = Callable[
     [AgentWorkflowState], Awaitable[dict[str, object] | None]
 ]
+
+
+def _persist_telemetry(
+    session_factory: sessionmaker[Session], telemetry: AgentRunTelemetry
+) -> None:
+    metrics = telemetry.summary()
+    with session_factory() as session:
+        run = session.get(AgentRun, telemetry.run_id)
+        if run is None:
+            return
+        events = list(run.events or [])
+        attempt = run.attempt_count
+        metrics["attempt"] = attempt
+        token_total = metrics["total_tokens"]
+        duration_ms = metrics["duration_ms"]
+        if metrics["provider_call_count"]:
+            message = f"执行耗时 {duration_ms} ms；外部调用 {metrics['provider_call_count']} 次。"
+            if token_total is not None and metrics["token_usage_complete"]:
+                message += f" Token 用量 {token_total}。"
+            elif token_total is not None:
+                message += f"已观测到 {token_total} 个 Token，用量信息不完整。"
+            if metrics["estimated_cost_usd"] is not None:
+                message += f" 估算费用 ${float(metrics['estimated_cost_usd']):.6f}。"
+            elif metrics["cost_estimate_complete"] is False:
+                message += "费用估算未完整配置。"
+        else:
+            message = f"执行耗时 {duration_ms} ms；未检测到外部模型或搜索服务调用。"
+        events.append(
+            {
+                "id": len(events) + 1,
+                "event": "telemetry",
+                "message": message,
+                "step": "telemetry",
+                "created_at": utc_now().isoformat(),
+                "metrics": metrics,
+            }
+        )
+        run.events = events
+        run.updated_at = utc_now()
+        session.commit()
 
 
 def build_agent_workflow_graph(
@@ -131,7 +175,15 @@ def build_agent_workflow_graph(
         route = validate_and_route(state)
         if route == "skip":
             return {}
-        return await handlers[route](state)
+        telemetry = AgentRunTelemetry(run_id=state["run_id"])
+        try:
+            with capture_agent_run(telemetry):
+                return await handlers[route](state)
+        finally:
+            try:
+                _persist_telemetry(session_factory, telemetry)
+            except Exception as exc:
+                logger.error("Could not persist Agent telemetry (%s)", type(exc).__name__)
 
     graph = StateGraph(AgentWorkflowState)
     graph.add_node("dispatch_registered_workflow", dispatch_registered_workflow)

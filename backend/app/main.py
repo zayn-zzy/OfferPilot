@@ -73,6 +73,7 @@ from app.services.agent_workflow import (
     AgentWorkflowState,
     build_agent_workflow_graph,
 )
+from app.services.agent_telemetry import request_id_middleware
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +143,11 @@ def create_app(
                 engine.dispose()
 
     app = FastAPI(title="OfferPilot API", version="0.1.0", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def correlate_request(request: Request, call_next):
+        return await request_id_middleware(request, call_next)
+
     app.state.settings = app_settings
     app.state.session_factory = factory
     app.state.job_extraction_provider = (

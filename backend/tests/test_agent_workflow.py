@@ -47,6 +47,7 @@ from app.services.knowledge import (
     GroundedAnswerCandidate,
     KnowledgeServiceError,
 )
+from app.services.agent_telemetry import bind_request_id
 from app.routes.research import research_company_for_job
 from app.schemas import KnowledgeAsk
 
@@ -214,7 +215,15 @@ async def test_dispatch_routes_each_registered_run_type(
             for task_type in SUPPORTED_AGENT_WORKFLOWS
         }
 
+    first_type, first_run = next(iter(runs.items()))
+    with bind_request_id("workflow-request-123"):
+        await graph.ainvoke(
+            {"task_type": first_type, "run_id": first_run.id, "operation": "run"},
+            version="v2",
+        )
     for task_type, run in runs.items():
+        if task_type == first_type:
+            continue
         await graph.ainvoke(
             {"task_type": task_type, "run_id": run.id, "operation": "run"},
             version="v2",
@@ -225,7 +234,12 @@ async def test_dispatch_routes_each_registered_run_type(
         for task_type, run in runs.items():
             stored = session.get(AgentRun, run.id)
             assert stored is not None
-            assert stored.events[-1]["step"] == "workflow_routed"
+            assert stored.events[-2]["step"] == "workflow_routed"
+            assert stored.events[-1]["step"] == "telemetry"
+            assert stored.events[-1]["metrics"]["duration_ms"] >= 0
+            assert stored.events[-1]["metrics"]["provider_call_count"] == 0
+            if task_type == first_type:
+                assert stored.events[-1]["metrics"]["request_id"] == "workflow-request-123"
             assert stored.task_type == task_type
 
 
@@ -365,6 +379,7 @@ async def test_app_router_runs_registered_job_extraction_handler(
         assert stored.attempt_count == 1
         assert stored.error_code == "test_provider_failure"
         assert stored.events[0]["step"] == "workflow_routed"
+        assert stored.events[-1]["step"] == "telemetry"
 
 
 @pytest.mark.anyio
@@ -455,6 +470,7 @@ async def test_app_router_runs_company_research_with_verified_sources(
             "public_search",
             "summarize",
             "completed",
+            "telemetry",
         ]
 
 
@@ -505,7 +521,8 @@ async def test_company_research_failure_is_saved_by_unified_router(
         assert stored.status == "failed"
         assert stored.attempt_count == 1
         assert stored.error_code == "research_rate_limited"
-        assert stored.events[-1]["event"] == "failed"
+        assert any(event["event"] == "failed" for event in stored.events)
+        assert stored.events[-1]["event"] == "telemetry"
 
 
 @pytest.mark.anyio
@@ -638,7 +655,8 @@ async def test_knowledge_qa_runs_through_router_and_keeps_owner_citations(
         assert failed.status == "failed"
         assert failed.attempt_count == 1
         assert failed.error_code == "embedding_timeout"
-        assert failed.events[-1]["event"] == "failed"
+        assert any(event["event"] == "failed" for event in failed.events)
+        assert failed.events[-1]["event"] == "telemetry"
 
 
 @pytest.mark.anyio
@@ -753,6 +771,7 @@ async def test_job_match_runs_through_router_and_records_owner_scoped_result(
             "workflow_routed",
             "compare",
             "completed",
+            "telemetry",
         ]
         assert failed.status == "failed"
         assert failed.error_code == "confirmed_resume_required"

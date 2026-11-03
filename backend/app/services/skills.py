@@ -8,6 +8,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from app.core.config import Settings
+from app.services.agent_telemetry import observed_async_client
 from app.schemas import (
     SkillCatalogItem,
     SkillCitationRead,
@@ -300,8 +301,8 @@ class OpenAICompatibleSkillProvider:
             ],
         }
         try:
-            async with httpx.AsyncClient(
-                timeout=settings.llm_timeout_seconds, transport=self._transport
+            async with observed_async_client(
+                settings, timeout=settings.llm_timeout_seconds, transport=self._transport
             ) as client:
                 response = await client.post(
                     _chat_completions_url(settings.llm_base_url),

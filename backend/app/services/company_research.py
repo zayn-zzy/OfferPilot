@@ -15,6 +15,7 @@ from mcp.server import MCPServer
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from app.core.config import Settings, get_settings
+from app.services.agent_telemetry import observed_async_client
 
 logger = logging.getLogger(__name__)
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
@@ -109,8 +110,8 @@ class TavilySearchProvider:
         bounded_count = max(1, min(int(count), MAX_SEARCH_RESULTS))
 
         try:
-            async with httpx.AsyncClient(
-                timeout=settings.research_timeout_seconds, transport=self._transport
+            async with observed_async_client(
+                settings, timeout=settings.research_timeout_seconds, transport=self._transport
             ) as client:
                 response = await client.post(
                     TAVILY_SEARCH_URL,
@@ -249,8 +250,8 @@ class OpenAICompatibleCompanyResearchSummarizer:
             else f"{normalized_base}/v1/chat/completions"
         )
         try:
-            async with httpx.AsyncClient(
-                timeout=settings.llm_timeout_seconds, transport=self._transport
+            async with observed_async_client(
+                settings, timeout=settings.llm_timeout_seconds, transport=self._transport
             ) as client:
                 response = await client.post(
                     endpoint,

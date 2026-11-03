@@ -268,9 +268,14 @@ export default function AgentTaskPlannerPage() {
                   : run.task_type === "knowledge_qa"
                     ? "/knowledge"
                     : "/jobs";
+              const telemetry = [
+                run.duration_ms !== null ? `${run.duration_ms} ms` : null,
+                run.total_tokens !== null ? `${run.total_tokens} tokens` : null,
+                run.estimated_cost_usd !== null ? `$${run.estimated_cost_usd.toFixed(6)}` : null,
+              ].filter(Boolean).join(" · ");
               return (
                 <li key={run.id}>
-                  <div><strong>{taskLabels[run.task_type] || "Agent 任务"}</strong><small>{run.job_label || "未关联岗位"} · {formatEventTime(run.created_at, workspace.timezone)}</small></div>
+                  <div><strong>{taskLabels[run.task_type] || "Agent 任务"}</strong><small>{run.job_label || "未关联岗位"} · {formatEventTime(run.created_at, workspace.timezone)}{telemetry ? ` · ${telemetry}` : ""}</small></div>
                   <span>{statusLabels[run.status] || run.status}</span>
                   <Link href={href}>打开</Link>
                 </li>
