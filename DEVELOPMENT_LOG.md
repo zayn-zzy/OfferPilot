@@ -678,3 +678,23 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 - 前端 `bun run typecheck` 通过；离线 Agent 评测命令通过，岗位抽取 50 条、RAG/公司研究 30 条合成样本均被完整读取，未调用线上 Provider。
 - 后端 `compileall`、72 条 OpenAPI 路径检查和 `git diff --check` 通过。
 - Next `bun run build` 在当前主机 5 分钟内未离开 compile 阶段。初次构建与现有开发服务共享 `.next`，随后改在临时副本、限制 CPU 亲和性后仍超时；因此不报告生产构建或真实浏览器回归通过。未启动 Docker/PostgreSQL/Redis，也未连接真实 LLM、Tavily 或 SMTP 服务。
+
+## PRD §6/§7：账户级模型 API Key 设置
+
+### 完成内容
+
+- 设置页新增 Chat Completions 与 Embeddings 配置。登录用户可录入、替换、移除自己的 API Key，并可选覆盖模型名；已保存密钥不回显，前端只显示配置来源和可用状态。
+- 新增账户级模型配置表及迁移 `20261104_0010`。API Key 用 AES-GCM 加密后存入数据库；随机 32 字节加密主密钥保存在服务端 storage 目录的 `.model-settings.key`，文件权限为 `0600`。密文绑定用户 ID 与 Provider，不能跨账户或跨用途解密。
+- Agent 岗位抽取、任务计划、公司研究摘要、资料问答、Skills 和资料 Embedding 索引调用，均按任务所有者解析账户密钥和模型覆盖。账户没有单独配置时继续使用部署者的共享环境变量作为默认值；已保存密钥无法解密时不会静默退回共享密钥。
+- 服务地址和默认模型仍由部署者配置；设置 API 只返回服务地址是否已配置，不暴露内部地址或 URL 中可能误填的凭据。Tavily、SMTP 等共享集成仍是部署级配置。
+- 账户删除会清除模型配置，数据导出不包含密钥。README、`.env.example` 与本 PRD 补充了配置、密钥文件备份/恢复及职责边界说明。
+
+### 技术与上一模块的区别
+
+上一模块完成评测与业务价值验收数据的收集入口；本次将模型 API Key 从“只能由部署者统一提供”扩展为“用户可配置自己的服务商凭据”，但服务端地址仍由部署者控制，避免用户输入地址造成服务端请求任意目标的风险。新增 SQLAlchemy/Alembic 持久化、`cryptography` AES-GCM 加密、FastAPI owner-scoped 设置接口与 Next.js 设置表单；Provider 调用前解析当前任务所有者的配置。
+
+### 验证
+
+- 后端全量回归：`UV_CACHE_DIR=/tmp/offerpilot-uv-cache uv run --offline pytest -o addopts='' -q -o faulthandler_timeout=60`，150 项通过；包含账户隔离、密文落库、不回显、部署 Key fallback、移除账户 Key、未登录拒绝、Agent 使用所有者 Key/模型，以及不暴露部署地址。
+- 空 SQLite 数据库成功从头执行至 `20261104_0010`；`uv lock --check --offline`、`python -m compileall`、前端 `bun run typecheck` 与 `git diff --check` 通过。
+- Provider 测试使用假实现/SQLite，不调用真实模型服务；没有做真实浏览器或 Compose/PostgreSQL 联调。

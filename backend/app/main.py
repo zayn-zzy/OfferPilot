@@ -4,6 +4,7 @@ import logging
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,6 +45,7 @@ from app.routes.research import (
 from app.routes.reminders import router as reminders_router
 from app.routes.reminders import notifications_router
 from app.routes.resumes import router as resumes_router
+from app.routes.settings import router as settings_router
 from app.routes.skills import (
     resume_skill_workflow,
     run_skill_workflow,
@@ -76,6 +78,7 @@ from app.services.agent_workflow import (
 )
 from app.services.agent_telemetry import request_id_middleware
 from app.services.external_actions import ExternalActionRegistry, SMTPEmailActionHandler
+from app.services.user_model_settings import resolve_user_model_settings
 
 logger = logging.getLogger(__name__)
 
@@ -209,11 +212,18 @@ def create_app(
     )
     app.state.skill_checkpoint_saver = in_memory_checkpointer_for(app_settings.database_url)
 
+    def model_settings_for_run(run_id: UUID) -> Settings:
+        with factory() as session:
+            run = session.get(AgentRun, run_id)
+            if run is None:
+                return app_settings
+            return resolve_user_model_settings(session, run.user_id, app_settings)
+
     async def dispatch_task_plan(state: AgentWorkflowState) -> dict[str, object]:
         await run_task_plan(
             state["run_id"],
             factory,
-            app_settings,
+            model_settings_for_run(state["run_id"]),
             app.state.task_planner_provider,
         )
         return {}
@@ -222,7 +232,7 @@ def create_app(
         await run_job_extraction(
             state["run_id"],
             factory,
-            app_settings,
+            model_settings_for_run(state["run_id"]),
             app.state.job_extraction_provider,
         )
         return {}
@@ -233,7 +243,7 @@ def create_app(
         await run_company_research_workflow(
             state["run_id"],
             factory,
-            app_settings,
+            model_settings_for_run(state["run_id"]),
             app.state.company_research_mcp_server,
             app.state.company_research_summarizer,
         )
@@ -245,7 +255,7 @@ def create_app(
         await run_knowledge_qa_workflow(
             state["run_id"],
             factory,
-            app_settings,
+            model_settings_for_run(state["run_id"]),
             app.state.embedding_provider,
             app.state.knowledge_answer_provider,
         )
@@ -260,7 +270,7 @@ def create_app(
             await resume_skill_workflow(
                 state["run_id"],
                 factory,
-                app_settings,
+                model_settings_for_run(state["run_id"]),
                 app.state.skill_provider,
                 approval_id=state["approval_id"],
                 decision=state["decision"],
@@ -270,7 +280,7 @@ def create_app(
             await run_skill_workflow(
                 state["run_id"],
                 factory,
-                app_settings,
+                model_settings_for_run(state["run_id"]),
                 app.state.skill_provider,
                 app.state.skill_checkpoint_saver,
             )
@@ -332,6 +342,7 @@ def create_app(
     app.include_router(notifications_router, prefix="/api/v1")
     app.include_router(skills_router, prefix="/api/v1")
     app.include_router(external_actions_router, prefix="/api/v1")
+    app.include_router(settings_router, prefix="/api/v1")
 
     @app.get("/health", response_model=HealthRead, tags=["system"])
     def health(

@@ -151,9 +151,8 @@ class OpenAICompatibleTaskPlanner:
         if not settings.llm_base_url.strip() or not api_key or not settings.llm_model.strip():
             raise TaskPlannerError(
                 "provider_not_configured",
-                "任务规划模型尚未配置。请在 backend/.env 设置 "
-                "OFFERPILOT_LLM_BASE_URL、OFFERPILOT_LLM_API_KEY 和 "
-                "OFFERPILOT_LLM_MODEL 后重试。",
+                "任务规划模型尚未配置。请在设置中填写账户 API Key，或由部署者设置共享 API Key；"
+                "服务地址仍需配置 OFFERPILOT_LLM_BASE_URL，并提供默认模型或账户模型覆盖。",
             )
         try:
             local_now = now.astimezone(ZoneInfo(timezone_name))

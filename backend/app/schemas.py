@@ -91,6 +91,62 @@ class UserTimezoneUpdateRead(BaseModel):
     recalculated_reminders: int
 
 
+class ModelProviderSettingsRead(BaseModel):
+    """Non-secret status for one configured model provider."""
+
+    endpoint_configured: bool
+    default_model: str
+    model_override: str | None
+    effective_model: str
+    credential_configured: bool
+    credential_available: bool
+    credential_source: Literal["account", "deployment", "not_configured", "unavailable"]
+    ready: bool
+
+
+class UserModelSettingsRead(BaseModel):
+    chat_completions: ModelProviderSettingsRead
+    embeddings: ModelProviderSettingsRead
+
+
+class UserModelSettingsWrite(BaseModel):
+    """Accept new secrets without ever returning an existing secret."""
+
+    llm_api_key: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
+    llm_model: str | None = Field(default=None, max_length=120)
+    clear_llm_api_key: bool = False
+    clear_llm_model: bool = False
+    embedding_api_key: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
+    embedding_model: str | None = Field(default=None, max_length=120)
+    clear_embedding_api_key: bool = False
+    clear_embedding_model: bool = False
+
+    @field_validator("llm_model", "embedding_model")
+    @classmethod
+    def normalize_model_name(cls, value: str | None) -> str | None:
+        normalized = value.strip() if value is not None else None
+        return normalized or None
+
+    @field_validator("llm_api_key", "embedding_api_key")
+    @classmethod
+    def reject_blank_api_keys(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and not value.get_secret_value().strip():
+            raise ValueError("API Key 不能为空；如需移除请使用清除选项")
+        return value
+
+    @model_validator(mode="after")
+    def reject_conflicting_secret_actions(self) -> "UserModelSettingsWrite":
+        if self.clear_llm_api_key and self.llm_api_key is not None:
+            raise ValueError("不能同时设置和清除 Chat Completions API Key")
+        if self.clear_embedding_api_key and self.embedding_api_key is not None:
+            raise ValueError("不能同时设置和清除 Embeddings API Key")
+        if self.clear_llm_model and self.llm_model is not None:
+            raise ValueError("不能同时设置和清除 Chat Completions 模型覆盖")
+        if self.clear_embedding_model and self.embedding_model is not None:
+            raise ValueError("不能同时设置和清除 Embeddings 模型覆盖")
+        return self
+
+
 class HealthRead(BaseModel):
     """Health endpoint response."""
 

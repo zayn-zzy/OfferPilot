@@ -150,7 +150,8 @@ class OpenAICompatibleJobExtractionProvider:
         if not settings.llm_base_url.strip() or not api_key or not settings.llm_model.strip():
             raise JobExtractionError(
                 "provider_not_configured",
-                "岗位抽取模型尚未配置。请在 backend/.env 设置 OFFERPILOT_LLM_BASE_URL、OFFERPILOT_LLM_API_KEY 和 OFFERPILOT_LLM_MODEL 后重试。",
+                "岗位抽取模型尚未配置。请在设置中填写账户 API Key，或由部署者设置共享默认值 OFFERPILOT_LLM_API_KEY；"
+                "服务地址仍需配置 OFFERPILOT_LLM_BASE_URL，并提供默认模型或账户模型覆盖。",
             )
 
         payload = {

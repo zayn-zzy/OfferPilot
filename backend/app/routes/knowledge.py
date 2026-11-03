@@ -33,6 +33,7 @@ from app.services.knowledge import (
     split_into_chunks,
     validate_answer_citations,
 )
+from app.services.user_model_settings import resolve_user_model_settings
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 logger = logging.getLogger(__name__)
@@ -155,6 +156,7 @@ async def reindex_knowledge(
         sources.append(("note", note.id, note.title, note.content))
     # Do not hold a read transaction open while the embedding provider is called.
     session.rollback()
+    provider_settings = resolve_user_model_settings(session, user.id, settings)
 
     pending: list[tuple[str, UUID, str, int, str]] = []
     for source_type, source_id, source_name, text in sources:
@@ -167,11 +169,11 @@ async def reindex_knowledge(
         )
 
     vectors: list[list[float]] = []
-    model_name = settings.embedding_model.strip()
+    model_name = provider_settings.embedding_model.strip()
     if pending:
         try:
             vectors, model_name = await request.app.state.embedding_provider.embed(
-                [item[4] for item in pending], settings
+                [item[4] for item in pending], provider_settings
             )
         except KnowledgeServiceError as exc:
             logger.warning("Knowledge indexing provider failed (%s)", exc.code)

@@ -5,6 +5,33 @@ export type User = {
   created_at: string;
 };
 
+export type ModelProviderSettings = {
+  endpoint_configured: boolean;
+  default_model: string;
+  model_override: string | null;
+  effective_model: string;
+  credential_configured: boolean;
+  credential_available: boolean;
+  credential_source: "account" | "deployment" | "not_configured" | "unavailable";
+  ready: boolean;
+};
+
+export type UserModelSettings = {
+  chat_completions: ModelProviderSettings;
+  embeddings: ModelProviderSettings;
+};
+
+export type UserModelSettingsWrite = {
+  llm_api_key?: string;
+  llm_model?: string;
+  clear_llm_api_key?: boolean;
+  clear_llm_model?: boolean;
+  embedding_api_key?: string;
+  embedding_model?: string;
+  clear_embedding_api_key?: boolean;
+  clear_embedding_model?: boolean;
+};
+
 export type UserTimezoneUpdate = { user: User; recalculated_reminders: number };
 
 export class ApiError extends Error {

@@ -209,7 +209,8 @@ class OpenAICompatibleCompanyResearchSummarizer:
         if not settings.llm_base_url.strip() or not key or not settings.llm_model.strip():
             raise CompanyResearchError(
                 "research_summary_not_configured",
-                "公司研究摘要尚未配置 Chat Completions 模型。",
+                "公司研究摘要尚未配置 Chat Completions 模型。请在设置中填写账户 API Key，"
+                "或由部署者设置共享 API Key、服务地址 OFFERPILOT_LLM_BASE_URL 和默认模型。",
             )
         source_payload = [source.model_dump(mode="json") for source in sources]
         request_payload = {

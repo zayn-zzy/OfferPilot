@@ -134,6 +134,21 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .settings-account-data dd { margin: 0; overflow-wrap: anywhere; }
 .settings-account-data a { color: var(--teal); font-weight: 700; }
 .settings-subtle { font-size: 11px !important; }
+.settings-model-form { max-width: 720px; margin-top: 20px; display: grid; gap: 14px; }
+.settings-model-provider { padding: 17px; display: grid; gap: 9px; border: 1px solid var(--line); border-radius: 12px; background: #fbfdfb; }
+.settings-model-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.settings-model-heading h3 { margin: 0; font-size: 14px; }
+.settings-model-heading p { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
+.settings-model-state { flex: 0 0 auto; padding: 6px 9px; border-radius: 20px; color: #38675d; background: #edf6f0; font-size: 10px; }
+.settings-model-data { margin: 6px 0; display: grid; gap: 7px; }
+.settings-model-data > div { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 9px; font-size: 11px; }
+.settings-model-data dt { color: var(--muted); }
+.settings-model-data dd { margin: 0; overflow-wrap: anywhere; }
+.settings-model-provider label { margin-top: 4px; font-size: 11px; font-weight: 700; }
+.settings-model-provider input { width: 100%; height: 41px; padding: 0 11px; border: 1px solid #dce6df; border-radius: 8px; outline: none; color: var(--ink); background: white; font-size: 12px; }
+.settings-model-provider input:focus { border-color: #76aa9b; box-shadow: 0 0 0 3px #26786e14; }
+.settings-clear-secret { justify-self: start; padding: 0; border: 0; color: #8a4b3e; background: transparent; font-size: 10px; cursor: pointer; }
+.settings-model-form > .button { justify-self: start; }
 .settings-danger-panel { border-color: #ecd6d2; }
 .settings-danger-panel .eyebrow, .settings-danger-panel h2 { color: #983c3c; }
 .settings-delete-form { max-width: 450px; margin-top: 19px; display: grid; gap: 9px; }

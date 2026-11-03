@@ -40,6 +40,7 @@ from app.models import (
     Reminder,
     ResumeVersion,
     User,
+    UserModelConfiguration,
 )
 from app.routes.auth import (
     current_user_dependency,
@@ -66,6 +67,7 @@ _OWNED_MODELS = (
     ApprovalRequest,
     ApplicationPrepPack,
     ExternalActionApproval,
+    UserModelConfiguration,
     JobSourceEvidence,
     Application,
     Reminder,

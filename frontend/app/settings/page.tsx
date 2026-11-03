@@ -2,10 +2,24 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ApiError, apiRequest, type User } from "@/lib/api";
+import {
+  ApiError,
+  apiRequest,
+  type User,
+  type UserModelSettings,
+  type UserModelSettingsWrite,
+} from "@/lib/api";
 
 export default function SettingsPage() {
   const [user, setUser] = useState<User | null>(null);
+  const [modelSettings, setModelSettings] = useState<UserModelSettings | null>(null);
+  const [llmApiKey, setLlmApiKey] = useState("");
+  const [embeddingApiKey, setEmbeddingApiKey] = useState("");
+  const [llmModel, setLlmModel] = useState("");
+  const [embeddingModel, setEmbeddingModel] = useState("");
+  const [clearLlmKey, setClearLlmKey] = useState(false);
+  const [clearEmbeddingKey, setClearEmbeddingKey] = useState(false);
+  const [savingModels, setSavingModels] = useState(false);
   const [emailConfirmation, setEmailConfirmation] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(true);
@@ -16,14 +30,77 @@ export default function SettingsPage() {
   const [requiresLogin, setRequiresLogin] = useState(false);
 
   useEffect(() => {
-    apiRequest<User>("/api/v1/auth/me")
-      .then(setUser)
+    Promise.all([
+      apiRequest<User>("/api/v1/auth/me"),
+      apiRequest<UserModelSettings>("/api/v1/settings/models"),
+    ])
+      .then(([currentUser, configuredModels]) => {
+        setUser(currentUser);
+        setModelSettings(configuredModels);
+        setLlmModel(configuredModels.chat_completions.model_override ?? "");
+        setEmbeddingModel(configuredModels.embeddings.model_override ?? "");
+      })
       .catch((cause) => {
         setError(cause instanceof Error ? cause.message : "无法载入账户设置。");
         setRequiresLogin(cause instanceof ApiError && cause.status === 401);
       })
       .finally(() => setLoading(false));
   }, []);
+
+  async function saveModelSettings(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!modelSettings) return;
+    setSavingModels(true);
+    setError("");
+    setNotice("");
+
+    const update: UserModelSettingsWrite = {};
+    if (llmApiKey.trim()) update.llm_api_key = llmApiKey;
+    if (embeddingApiKey.trim()) update.embedding_api_key = embeddingApiKey;
+    if (clearLlmKey) update.clear_llm_api_key = true;
+    if (clearEmbeddingKey) update.clear_embedding_api_key = true;
+
+    const previousLlmModel = modelSettings.chat_completions.model_override ?? "";
+    if (llmModel.trim() && llmModel.trim() !== previousLlmModel) {
+      update.llm_model = llmModel.trim();
+    } else if (!llmModel.trim() && previousLlmModel) {
+      update.clear_llm_model = true;
+    }
+    const previousEmbeddingModel = modelSettings.embeddings.model_override ?? "";
+    if (embeddingModel.trim() && embeddingModel.trim() !== previousEmbeddingModel) {
+      update.embedding_model = embeddingModel.trim();
+    } else if (!embeddingModel.trim() && previousEmbeddingModel) {
+      update.clear_embedding_model = true;
+    }
+
+    try {
+      const saved = await apiRequest<UserModelSettings>("/api/v1/settings/models", {
+        method: "PUT",
+        body: JSON.stringify(update),
+      });
+      setModelSettings(saved);
+      setLlmApiKey("");
+      setEmbeddingApiKey("");
+      setLlmModel(saved.chat_completions.model_override ?? "");
+      setEmbeddingModel(saved.embeddings.model_override ?? "");
+      setClearLlmKey(false);
+      setClearEmbeddingKey(false);
+      setNotice("模型设置已保存。API Key 只在服务端加密保存，不会再次显示。");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "模型设置保存失败，请稍后重试。");
+      if (cause instanceof ApiError && cause.status === 401) setRequiresLogin(true);
+    } finally {
+      setSavingModels(false);
+    }
+  }
+
+  function credentialStatus(provider: "chat_completions" | "embeddings") {
+    const source = modelSettings?.[provider].credential_source;
+    if (source === "account") return "已保存账户 API Key";
+    if (source === "deployment") return "使用部署者提供的默认 API Key";
+    if (source === "unavailable") return "已保存的 Key 无法解密，请重新输入";
+    return "未配置 API Key";
+  }
 
   async function exportData() {
     setExporting(true);
@@ -112,8 +189,84 @@ export default function SettingsPage() {
           <section className="profile-panel settings-panel">
             <p className="eyebrow">服务配置</p>
             <h2>模型与搜索服务</h2>
-            <p>LLM、Embedding 和 Tavily 等服务由部署者在后端环境变量中配置。网页不会读取或显示 API 密钥，也不会把密钥放入个人数据导出包。</p>
-            <p className="settings-subtle">本地部署可在 <code>backend/.env</code> 管理配置；修改后按 README 重启 API。</p>
+            <p>你可以为当前账户设置 Chat Completions 和 Embeddings API Key。密钥只提交到后端并加密保存；页面和 API 都不会回显密钥。留空表示保持现有密钥，或继续使用部署默认密钥。</p>
+            <p className="settings-subtle">服务地址由部署者在后端配置。Tavily 搜索和 SMTP 仍使用部署级配置。</p>
+            {modelSettings && (
+              <form className="settings-model-form" onSubmit={(event) => void saveModelSettings(event)}>
+                <div className="settings-model-provider">
+                  <div className="settings-model-heading">
+                    <div>
+                      <h3>Chat Completions</h3>
+                      <p>{modelSettings.chat_completions.ready ? "可用于岗位抽取、Agent 与问答" : "尚未完整配置"}</p>
+                    </div>
+                    <span className="settings-model-state">{credentialStatus("chat_completions")}</span>
+                  </div>
+                  <dl className="settings-model-data">
+                    <div><dt>服务地址</dt><dd>{modelSettings.chat_completions.endpoint_configured ? "已由部署者配置" : "部署者尚未配置"}</dd></div>
+                    <div><dt>当前模型</dt><dd>{modelSettings.chat_completions.effective_model || "部署者尚未配置"}</dd></div>
+                  </dl>
+                  <label htmlFor="settings-llm-key">替换账户 API Key</label>
+                  <input
+                    id="settings-llm-key"
+                    autoComplete="new-password"
+                    type="password"
+                    value={llmApiKey}
+                    placeholder={modelSettings.chat_completions.credential_source === "account" ? "已保存；输入新 Key 可替换" : "粘贴服务商 API Key"}
+                    onChange={(event) => { setLlmApiKey(event.target.value); setClearLlmKey(false); }}
+                  />
+                  <label htmlFor="settings-llm-model">模型名称覆盖（可选）</label>
+                  <input
+                    id="settings-llm-model"
+                    value={llmModel}
+                    placeholder={`使用部署默认：${modelSettings.chat_completions.default_model || "未配置"}`}
+                    onChange={(event) => setLlmModel(event.target.value)}
+                  />
+                  {modelSettings.chat_completions.credential_source === "account" && (
+                    <button className="settings-clear-secret" type="button" onClick={() => { setClearLlmKey(true); setLlmApiKey(""); }}>
+                      移除账户 Key，改用部署默认值
+                    </button>
+                  )}
+                </div>
+
+                <div className="settings-model-provider">
+                  <div className="settings-model-heading">
+                    <div>
+                      <h3>Embeddings</h3>
+                      <p>{modelSettings.embeddings.ready ? "可用于资料索引和检索" : "尚未完整配置"}</p>
+                    </div>
+                    <span className="settings-model-state">{credentialStatus("embeddings")}</span>
+                  </div>
+                  <dl className="settings-model-data">
+                    <div><dt>服务地址</dt><dd>{modelSettings.embeddings.endpoint_configured ? "已由部署者配置" : "部署者尚未配置"}</dd></div>
+                    <div><dt>当前模型</dt><dd>{modelSettings.embeddings.effective_model || "部署者尚未配置"}</dd></div>
+                  </dl>
+                  <label htmlFor="settings-embedding-key">替换账户 API Key</label>
+                  <input
+                    id="settings-embedding-key"
+                    autoComplete="new-password"
+                    type="password"
+                    value={embeddingApiKey}
+                    placeholder={modelSettings.embeddings.credential_source === "account" ? "已保存；输入新 Key 可替换" : "粘贴服务商 API Key"}
+                    onChange={(event) => { setEmbeddingApiKey(event.target.value); setClearEmbeddingKey(false); }}
+                  />
+                  <label htmlFor="settings-embedding-model">模型名称覆盖（可选）</label>
+                  <input
+                    id="settings-embedding-model"
+                    value={embeddingModel}
+                    placeholder={`使用部署默认：${modelSettings.embeddings.default_model || "未配置"}`}
+                    onChange={(event) => setEmbeddingModel(event.target.value)}
+                  />
+                  {modelSettings.embeddings.credential_source === "account" && (
+                    <button className="settings-clear-secret" type="button" onClick={() => { setClearEmbeddingKey(true); setEmbeddingApiKey(""); }}>
+                      移除账户 Key，改用部署默认值
+                    </button>
+                  )}
+                </div>
+                <button className="button button-primary" disabled={savingModels} type="submit">
+                  {savingModels ? "正在保存…" : "保存模型设置"}
+                </button>
+              </form>
+            )}
           </section>
 
           <section className="profile-panel settings-panel">

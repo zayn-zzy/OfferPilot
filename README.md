@@ -62,7 +62,11 @@ ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:3000:127.0.0.1:3000 user@server
 
 岗位页的“AI 提取岗位”接收用户粘贴的招聘原文（20–30,000 字符）和可选来源链接，不会自动访问网站。原文会发送到你配置的模型服务商处理，请先确认服务商符合你的隐私要求。后端通过 OpenAI 兼容的 Chat Completions 接口提取公司、职位、城市、类型、批次、截止日期、学历和技能；每个字段附置信度和原文引用。服务端会核对引用是否逐字出现在用户文本中，不成立的字段将置信度降为 0。用户逐项检查/修改后确认，岗位和原文来源依据才会保存；低置信度、缺失值或无引用的字段会标记为“需要确认”。
 
-复制 `.env.example` 到仓库根目录 `.env` 并配置 `OFFERPILOT_LLM_BASE_URL`、`OFFERPILOT_LLM_API_KEY` 与 `OFFERPILOT_LLM_MODEL`，Compose API 会读取这些变量。直接本地启动 API 时，把相同变量放在 `backend/.env`。支持以 `/v1` 结尾的 API 根地址，或直接提供 `/v1/chat/completions` 地址。密钥只在 API 进程内读取，不通过设置接口或任务响应返回。未配置时任务会显示明确失败原因，配置完成后可重试。
+将 `OFFERPILOT_LLM_BASE_URL` 配成兼容服务商的 HTTPS API 根地址，并设置默认模型 `OFFERPILOT_LLM_MODEL`。API Key 可以由每位用户在“设置 → 模型与搜索服务”中填写，不再要求部署者为所有用户提供模型密钥；也可继续设置 `OFFERPILOT_LLM_API_KEY` 作为共享默认 Key。用户可在设置页单独覆盖模型名。若 Compose/local 的 `backend/.env` 都没有 Key，用户账户 Key 是模型调用的凭据来源。设置页不会回显已保存密钥。
+
+Embedding 同理：部署者提供 `OFFERPILOT_EMBEDDING_BASE_URL` 和默认模型，用户可在设置中填写自己的 Embeddings API Key、可选覆盖模型；环境变量 `OFFERPILOT_EMBEDDING_API_KEY` 仍可作为共享默认值。Chat 与 Embedding 可以使用不同的服务商。修改账户 Key 无需重启 API；服务地址仍由部署者配置，避免浏览器直接持有密钥或允许任意后端请求地址。
+
+账户 API Key 以 AES-GCM 加密后保存在数据库；首次保存时，API 会在服务端 `OFFERPILOT_STORAGE_DIR` 指向的目录中创建权限为 `0600` 的 `.model-settings.key`。Compose 下该目录位于持久化的 `resume_storage` 卷；本地运行则位于 `backend/storage/`。应把此文件作为密钥材料妥善备份，并限制服务器存储目录的访问权限。若数据库恢复时缺少对应加密文件，已保存的账户 Key 无法解密，需要用户重新录入。账户导出不包含 API Key；删除账户会一并删除账户模型配置。
 
 提取任务会将状态、进度事件、尝试次数、模型名和安全错误摘要保存在数据库中；前端通过 SSE 读取实时进度，也会从任务 API 恢复状态。排队任务可立即取消；运行中的任务会等待当前模型请求返回后丢弃结果并完成取消。失败任务最多尝试 3 次；进程重启导致的排队/运行中任务会转为失败并可重试，正在取消的任务会转为已取消。当前阶段使用 FastAPI 进程内后台任务；第 6 步引入 Celery/Redis 后再将执行迁移到持久化队列。这个抽取过程没有浏览器抓取工具，也不执行外部写操作。
 
@@ -74,11 +78,11 @@ ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:3000:127.0.0.1:3000 user@server
 
 “资料问答”页允许添加项目/求职笔记，并检索已确认的简历与笔记回答问题。点击“建立 / 更新索引”后，资料按 900 字符片段（有重叠）切分并生成向量；问题检索当前账户的相似片段，模型只能依据这些片段作答。系统只保留模型引用中确实出现在检索片段里的原文；没有支持性引用时返回无证据结果。简历删除、笔记编辑/删除会同步删除相关索引片段；新资料需重新建立索引。
 
-向量生成使用独立的 OpenAI 兼容 Embeddings API，使用服务返回的原生维度；问答复用已配置的 Chat Completions API。两项服务可以使用不同的供应商和模型。需要在仓库根 `.env`（Compose）或 `backend/.env`（本地 API）设置：
+向量生成使用独立的 OpenAI 兼容 Embeddings API，使用服务返回的原生维度；问答复用已配置的 Chat Completions API。两项服务可以使用不同的供应商和模型。需要在仓库根 `.env`（Compose）或 `backend/.env`（本地 API）设置服务地址和默认模型；API Key 可通过设置页按账户提供，也可通过环境变量提供共享默认值：
 
 ```dotenv
 OFFERPILOT_EMBEDDING_BASE_URL=https://your-provider.example/v1
-OFFERPILOT_EMBEDDING_API_KEY=your-embedding-key
+OFFERPILOT_EMBEDDING_API_KEY=
 OFFERPILOT_EMBEDDING_MODEL=your-embedding-model
 ```
 

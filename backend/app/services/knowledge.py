@@ -80,8 +80,8 @@ class OpenAICompatibleEmbeddingProvider:
         if not settings.embedding_base_url.strip() or not key or not settings.embedding_model.strip():
             raise KnowledgeServiceError(
                 "embedding_not_configured",
-                "资料检索尚未配置 Embeddings 服务。请设置 OFFERPILOT_EMBEDDING_BASE_URL、"
-                "OFFERPILOT_EMBEDDING_API_KEY 和 OFFERPILOT_EMBEDDING_MODEL。",
+                "资料检索尚未配置 Embeddings 服务。请在设置中填写账户 API Key，或由部署者设置共享 API Key；"
+                "服务地址仍需配置 OFFERPILOT_EMBEDDING_BASE_URL，并提供默认模型或账户模型覆盖。",
             )
         if not texts:
             return [], settings.embedding_model.strip()
@@ -163,8 +163,8 @@ class OpenAICompatibleKnowledgeAnswerProvider:
         if not settings.llm_base_url.strip() or not key or not settings.llm_model.strip():
             raise KnowledgeServiceError(
                 "answer_model_not_configured",
-                "资料问答尚未配置 Chat Completions 模型，请先配置 OFFERPILOT_LLM_BASE_URL、"
-                "OFFERPILOT_LLM_API_KEY 和 OFFERPILOT_LLM_MODEL。",
+                "资料问答尚未配置 Chat Completions 模型。请在设置中填写账户 API Key，或由部署者设置共享 API Key；"
+                "服务地址仍需配置 OFFERPILOT_LLM_BASE_URL，并提供默认模型或账户模型覆盖。",
             )
         context = [
             {"chunk_id": str(chunk.id), "source": chunk.source_name, "text": chunk.content}
