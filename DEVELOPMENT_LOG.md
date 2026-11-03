@@ -465,3 +465,9 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 
 - 后端 `.venv/bin/pytest -o addopts='' -q tests/test_agent_workspace.py`：2 项通过，覆盖能力目录/确认边界、跨流程运行摘要、隐私字段裁剪和用户隔离。
 - `.venv/bin/python -m compileall -q app tests`、FastAPI OpenAPI 路由检查、前端 `bun run typecheck` 和 `git diff --check` 通过。未运行浏览器端到端或真实模型联调。
+
+## 求职工作台加载超时兜底
+
+- 仪表盘读取 `/api/v1/dashboard` 时增加 15 秒超时和卸载清理；请求长期无响应时展示明确的超时错误与重试入口，不再永久停留在加载文案。
+- 排查时本机首页、仪表盘 HTML、前端脚本与 API 健康检查均返回成功；未登录的仪表盘 API 返回预期 401。当前没有已登录浏览器会话可复现挂起请求，因此超时处理是可见失败兜底，不代表已经定位导致原请求挂起的服务端原因。
+- 验证：前端 `bun run typecheck`、`git diff --check`；本机 HTTP 检查首页、仪表盘、API 健康状态及脚本资源。

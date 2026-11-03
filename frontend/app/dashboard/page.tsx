@@ -63,12 +63,30 @@ export default function DashboardPage() {
   const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
-    apiRequest<DashboardSummary>("/api/v1/dashboard")
-      .then(setDashboard)
+    const controller = new AbortController();
+    let active = true;
+    const timeout = window.setTimeout(() => controller.abort(), 15000);
+
+    apiRequest<DashboardSummary>("/api/v1/dashboard", { signal: controller.signal })
+      .then((summary) => {
+        if (active) setDashboard(summary);
+      })
       .catch((cause) => {
-        setError(cause instanceof Error ? cause.message : "无法载入求职工作台。");
+        if (!active) return;
+        setError(
+          cause instanceof DOMException && cause.name === "AbortError"
+            ? "工作台请求超时。请确认 API 服务可用后重试。"
+            : cause instanceof Error ? cause.message : "无法载入求职工作台。",
+        );
         setRequiresLogin(cause instanceof ApiError && cause.status === 401);
-      });
+      })
+      .finally(() => window.clearTimeout(timeout));
+
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, []);
 
   async function logout() {
