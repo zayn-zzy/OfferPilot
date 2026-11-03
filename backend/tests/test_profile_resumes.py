@@ -41,13 +41,6 @@ def test_app(tmp_path: Path) -> Generator[FastAPI, None, None]:
 
 
 @pytest.fixture
-def anyio_backend() -> str:
-    """Run async API tests using AnyIO's asyncio backend."""
-
-    return "asyncio"
-
-
-@pytest.fixture
 async def client(test_app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
     """Create a cookie-preserving in-process API client."""
 

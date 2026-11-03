@@ -37,13 +37,6 @@ def test_app() -> Generator[FastAPI, None, None]:
 
 
 @pytest.fixture
-def anyio_backend() -> str:
-    """Run async API tests with the backend included in the project environment."""
-
-    return "asyncio"
-
-
-@pytest.fixture
 async def client(test_app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
     """Create an in-process HTTP client without starting a server process."""
 

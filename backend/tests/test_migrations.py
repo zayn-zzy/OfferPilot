@@ -1,24 +1,20 @@
 """Exercise real Alembic upgrades against an existing user database."""
 
 from pathlib import Path
+from uuid import uuid4
 
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from httpx import ASGITransport, AsyncClient
 import pytest
-from sqlalchemy import inspect, text
+from sqlalchemy import MetaData, Table, inspect, text
 
 from app.core.config import Settings
+from app.core.security import hash_password
 from app.db import create_session_factory
 from app.main import create_app
-
-
-@pytest.fixture
-def anyio_backend() -> str:
-    """Run the migration and API workflow using asyncio."""
-
-    return "asyncio"
+from app.models import CandidateProfile, ResumeVersion, User, utc_now
 
 
 @pytest.mark.anyio
@@ -30,6 +26,7 @@ async def test_upgrade_existing_profile_database_preserves_data_and_enables_jobs
 
     backend_dir = Path(__file__).resolve().parents[1]
     settings = Settings(
+        _env_file=None,
         environment="test",
         database_url=f"sqlite:///{tmp_path / 'existing-user.db'}",
         secret_key="test-migration-secret-that-is-long-enough-for-testing",
@@ -44,40 +41,60 @@ async def test_upgrade_existing_profile_database_preserves_data_and_enables_jobs
     engine, factory = create_session_factory(settings)
     try:
         assert "job_postings" not in inspect(engine).get_table_names()
+        credentials = {
+            "email": "existing-user@example.com",
+            "password": "correct-horse-battery",
+        }
+        user_id = uuid4()
+        resume_id = uuid4()
+        timestamp = utc_now()
+        resume_text = "升级前的简历：Python、SQL，求职目标后端工程师。"
+        legacy_users = Table("users", MetaData(), autoload_with=engine)
+        with engine.begin() as connection:
+            # Seed rows using only columns present at revision 0002. The current ORM
+            # includes later columns, so current API writes must wait until migration.
+            connection.execute(
+                legacy_users.insert().values(
+                    id=user_id.hex,
+                    email=credentials["email"],
+                    password_hash=hash_password(credentials["password"]),
+                    created_at=timestamp,
+                )
+            )
+            connection.execute(
+                CandidateProfile.__table__.insert().values(
+                    id=uuid4(),
+                    user_id=user_id,
+                    graduation_year=2027,
+                    education="硕士",
+                    major="计算机科学",
+                    target_roles=["后端工程师"],
+                    target_cities=["上海"],
+                    industries=[],
+                    skills=["Python", "SQL"],
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                )
+            )
+            connection.execute(
+                ResumeVersion.__table__.insert().values(
+                    id=resume_id,
+                    user_id=user_id,
+                    filename="pasted-resume.txt",
+                    source_type="text",
+                    content_type="text/plain",
+                    storage_key=None,
+                    extracted_text=resume_text,
+                    confirmed_at=timestamp,
+                    created_at=timestamp,
+                )
+            )
+
         app = create_app(settings, factory)
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://testserver"
         ) as client:
-            credentials = {
-                "email": "existing-user@example.com",
-                "password": "correct-horse-battery",
-            }
-            registered = await client.post("/api/v1/auth/register", json=credentials)
-            assert registered.status_code == 201
-            original_user = registered.json()
-
-            saved_profile = await client.put(
-                "/api/v1/profile",
-                json={
-                    "graduation_year": 2027,
-                    "education": "硕士",
-                    "major": "计算机科学",
-                    "target_roles": ["后端工程师"],
-                    "target_cities": ["上海"],
-                    "skills": ["Python", "SQL"],
-                },
-            )
-            assert saved_profile.status_code == 200
-            created_resume = await client.post(
-                "/api/v1/resumes/text",
-                json={"text": "升级前的简历：Python、SQL，求职目标后端工程师。"},
-            )
-            assert created_resume.status_code == 201
-            resume_id = created_resume.json()["id"]
-            confirmed_resume = await client.post(f"/api/v1/resumes/{resume_id}/confirm")
-            assert confirmed_resume.status_code == 200
-
-            missing_schema = await client.get("/api/v1/jobs")
+            missing_schema = await client.get("/health")
             assert missing_schema.status_code == 503
             assert missing_schema.json()["code"] == "database_schema_outdated"
             assert "uv run alembic upgrade head" in missing_schema.json()["detail"]
@@ -113,14 +130,17 @@ async def test_upgrade_existing_profile_database_preserves_data_and_enables_jobs
                 )
 
             # Existing credentials and saved data must work after the upgrade.
-            assert (await client.post("/api/v1/auth/logout")).status_code == 204
             logged_in = await client.post("/api/v1/auth/login", json=credentials)
             assert logged_in.status_code == 200
-            assert logged_in.json() == original_user
-            assert (await client.get("/api/v1/profile")).json() == saved_profile.json()
-            assert (await client.get(f"/api/v1/resumes/{resume_id}")).json() == (
-                confirmed_resume.json()
-            )
+            assert logged_in.json()["id"] == str(user_id)
+            saved_profile = await client.get("/api/v1/profile")
+            assert saved_profile.status_code == 200
+            assert saved_profile.json()["graduation_year"] == 2027
+            assert saved_profile.json()["target_roles"] == ["后端工程师"]
+            confirmed_resume = await client.get(f"/api/v1/resumes/{resume_id}")
+            assert confirmed_resume.status_code == 200
+            assert confirmed_resume.json()["extracted_text"] == resume_text
+            assert confirmed_resume.json()["confirmed_at"] is not None
             assert (await client.get("/health")).status_code == 200
             initial_jobs = await client.get("/api/v1/jobs")
             assert initial_jobs.status_code == 200
@@ -150,12 +170,12 @@ async def test_upgrade_existing_profile_database_preserves_data_and_enables_jobs
                 json={
                     "status": "applied",
                     "applied_at": "2026-10-31",
-                    "resume_version_id": resume_id,
+                    "resume_version_id": str(resume_id),
                     "notes": "使用升级前保存的简历",
                 },
             )
             assert updated.status_code == 200
-            assert updated.json()["application"]["resume_version_id"] == resume_id
+            assert updated.json()["application"]["resume_version_id"] == str(resume_id)
             tracked_jobs = await client.get("/api/v1/jobs?tracked=true&status=applied")
             assert tracked_jobs.status_code == 200
             assert [job["id"] for job in tracked_jobs.json()] == [job_id]

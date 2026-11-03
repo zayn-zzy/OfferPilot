@@ -645,3 +645,18 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 - `tests/test_skills.py`：14 项通过；前端 `bun run typecheck`、后端 `compileall`、OpenAPI 路由注册与 `git diff --check` 通过。
 - 独立临时 SQLite 数据库完整执行 `alembic upgrade head`，确认 `external_action_approvals` 已创建。集成迁移用例因既有 ASGI 注册请求长时间无输出而停止；没有把它报告为通过。
 - 未配置真实 SMTP 凭证，也未向真实收件人发信；SMTP 连接行为由假 SMTP 客户端验证。配置 SMTP 后可在 `/actions` 手动检查真实邮件链路。
+
+## 回归测试可复现性与旧库迁移验证
+
+### 完成内容
+
+- 定位并消除 ASGI 回归测试挂起：测试模块曾分别强制选择 asyncio selector loop，导致同步 FastAPI 路由通过 AnyIO worker thread 返回后测试请求无法恢复。共享 `anyio_backend` 现使用 Linux Uvicorn `auto` 模式会选用的 uvloop，并删除各模块冲突的局部覆盖。
+- 测试工作目录现在对每个用例隔离到临时目录，阻止仓库 `backend/.env` 中的真实凭证和 SMTP/TLS 选项污染测试；SMTP 测试也显式使用无 `.env` 的测试设置。
+- 修正旧库升级回归：在 Alembic revision `20261030_0002` 下直接按旧表结构写入账户、档案与已确认简历，先验证健康检查给出可操作的 schema 未升级响应，再升级到最新 revision，通过 API 登录并读取原数据、关联简历到新建投递记录并验证阶段历史。测试不再用当前 ORM 向旧 schema 写入。
+
+### 验证
+
+- 后端全量回归：`backend/.venv/bin/pytest -o addopts='' -q -o faulthandler_timeout=60`，133 项全部通过（56.54 秒）。
+- 前端 `bun run typecheck` 通过；离线 Agent 评测命令通过，岗位抽取 50 条、RAG/公司研究 30 条合成样本均被完整读取，未调用线上 Provider。
+- 后端 `compileall`、72 条 OpenAPI 路径检查和 `git diff --check` 通过。
+- Next `bun run build` 在当前主机 5 分钟内未离开 compile 阶段。初次构建与现有开发服务共享 `.next`，随后改在临时副本、限制 CPU 亲和性后仍超时；因此不报告生产构建或真实浏览器回归通过。未启动 Docker/PostgreSQL/Redis，也未连接真实 LLM、Tavily 或 SMTP 服务。

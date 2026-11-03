@@ -126,11 +126,6 @@ def test_app(tmp_path: Path) -> Generator[FastAPI, None, None]:
 
 
 @pytest.fixture
-def anyio_backend() -> str:
-    return "asyncio"
-
-
-@pytest.fixture
 async def client(test_app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
     async with AsyncClient(
         transport=ASGITransport(app=test_app), base_url="http://testserver"

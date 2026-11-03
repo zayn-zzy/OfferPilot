@@ -89,6 +89,7 @@ def action_context(tmp_path: Path) -> Generator[dict[str, object], None, None]:
     session.refresh(owner)
     session.refresh(other)
     settings = Settings(
+        _env_file=None,
         allowed_origins=["http://localhost:3000"],
         smtp_host="smtp.example.com",
         smtp_username="offerpilot",
