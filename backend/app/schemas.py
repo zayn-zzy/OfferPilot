@@ -411,6 +411,10 @@ class JobCsvPreviewRowRead(BaseModel):
     data: JobPostingWrite | None
     errors: list[str] = Field(default_factory=list)
     duplicate_detail: str | None = None
+    duplicate_job_id: UUID | None = None
+    duplicate_job_company_name: str | None = None
+    duplicate_job_title: str | None = None
+    duplicate_of_row_number: int | None = None
 
 
 class JobCsvPreviewRead(BaseModel):
@@ -604,6 +608,7 @@ class JobExtractionConfirm(BaseModel):
     deadline: date | None = None
     education_requirement: str | None = Field(default=None, max_length=120)
     required_skills: list[str] | None = Field(default=None, max_length=50)
+    merge_into_job_id: UUID | None = None
 
     @field_validator("source_url")
     @classmethod

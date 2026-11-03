@@ -182,7 +182,8 @@ async def test_duplicate_source_url_is_rejected_with_actionable_hint(client: Asy
 
     assert first.status_code == 201
     assert duplicate.status_code == 409
-    assert "编辑已有岗位" in duplicate.json()["detail"]
+    assert duplicate.json()["detail"]["code"] == "duplicate_job_source"
+    assert duplicate.json()["detail"]["existing_job_id"] == first.json()["id"]
 
 
 @pytest.mark.anyio

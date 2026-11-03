@@ -20,6 +20,51 @@ import JobExtractionPanel from "./job-extraction-panel";
 
 type Filters = { search: string; city: string; status: string; deadline_before: string; tag: string };
 const DEFAULT_FILTERS: Filters = { search: "", city: "", status: "", deadline_before: "", tag: "" };
+const JOB_MERGE_LABELS: Partial<Record<keyof JobPostingWrite, string>> = {
+  company_name: "公司",
+  company_website_url: "公司官网",
+  recruitment_url: "招聘主页",
+  industry: "行业",
+  company_notes: "公司备注",
+  title: "职位",
+  city: "城市",
+  job_type: "岗位类型",
+  batch: "招聘批次",
+  deadline: "截止日期",
+  education_requirement: "学历要求",
+  description: "岗位描述",
+};
+
+function mergeCsvPayload(
+  existing: JobPostingWrite,
+  incoming: JobPostingWrite,
+): { payload: JobPostingWrite; conflicts: string[] } {
+  const payload: JobPostingWrite = { ...existing };
+  const conflicts: string[] = [];
+  for (const field of Object.keys(JOB_MERGE_LABELS) as (keyof JobPostingWrite)[]) {
+    const current = payload[field];
+    const next = incoming[field];
+    if ((current === null || current === "") && typeof next === "string" && next) {
+      (payload as unknown as Record<string, unknown>)[field] = next;
+    } else if (current && next && current !== next) {
+      conflicts.push(JOB_MERGE_LABELS[field] ?? field);
+    }
+  }
+  const appendUnique = (left: string[], right: string[]) => {
+    const result = [...left];
+    const seen = new Set(left.map((item) => item.toLocaleLowerCase()));
+    for (const item of right) {
+      if (!seen.has(item.toLocaleLowerCase())) {
+        result.push(item);
+        seen.add(item.toLocaleLowerCase());
+      }
+    }
+    return result;
+  };
+  payload.required_skills = appendUnique(existing.required_skills, incoming.required_skills);
+  payload.tags = appendUnique(existing.tags, incoming.tags);
+  return { payload, conflicts };
+}
 
 function apiMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : "操作失败，请稍后重试。";
@@ -31,6 +76,8 @@ export default function JobsPage() {
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvPreview, setCsvPreview] = useState<JobCsvPreview | null>(null);
   const [selectedCsvRows, setSelectedCsvRows] = useState<number[]>([]);
+  const [mergedCsvRows, setMergedCsvRows] = useState<number[]>([]);
+  const [mergingCsvRow, setMergingCsvRow] = useState<number | null>(null);
   const [previewingCsv, setPreviewingCsv] = useState(false);
   const [importingCsv, setImportingCsv] = useState(false);
   const [createPanel, setCreatePanel] = useState<"new" | "csv" | "extract" | null>(null);
@@ -124,6 +171,7 @@ export default function JobsPage() {
           .filter((row) => row.status === "ready")
           .map((row) => row.row_number),
       );
+      setMergedCsvRows([]);
     } catch (cause) {
       setError(apiMessage(cause));
       setRequiresLogin(cause instanceof ApiError && cause.status === 401);
@@ -152,6 +200,7 @@ export default function JobsPage() {
       setCsvFile(null);
       setCsvPreview(null);
       setSelectedCsvRows([]);
+      setMergedCsvRows([]);
       await showSavedJobs(imported, `已导入 ${imported.length} 条岗位。可以在岗位列表中继续编辑。`);
     } catch (cause) {
       setError(apiMessage(cause));
@@ -170,6 +219,63 @@ export default function JobsPage() {
     setSelectedCsvRows(checked
       ? csvPreview?.rows.filter((row) => row.status === "ready").map((row) => row.row_number) ?? []
       : []);
+  }
+
+  function mergeCsvDuplicateIntoRow(row: JobCsvPreviewRow) {
+    if (!csvPreview || !row.data || !row.duplicate_of_row_number) return;
+    const target = csvPreview.rows.find((item) => item.row_number === row.duplicate_of_row_number);
+    if (!target?.data) return;
+    const { payload, conflicts } = mergeCsvPayload(target.data, row.data);
+    const detail = conflicts.length
+      ? `已补充空字段并合并技能/标签；冲突字段保留第 ${target.row_number} 行的值：${conflicts.join("、")}`
+      : `已补充第 ${target.row_number} 行的空字段，并合并技能和标签。`;
+    setCsvPreview({
+      ...csvPreview,
+      rows: csvPreview.rows.map((item) => {
+        if (item.row_number === target.row_number) {
+          return {
+            ...item,
+            data: payload,
+            company_name: payload.company_name,
+            title: payload.title,
+            city: payload.city,
+            deadline: payload.deadline,
+          };
+        }
+        if (item.row_number === row.row_number) {
+          return { ...item, duplicate_detail: detail };
+        }
+        return item;
+      }),
+    });
+    setSelectedCsvRows((current) => current.includes(target.row_number)
+      ? current
+      : [...current, target.row_number]);
+    setMergedCsvRows((current) => current.includes(row.row_number)
+      ? current
+      : [...current, row.row_number]);
+  }
+
+  async function mergeIntoExistingJob(targetJobId: string, payload: JobPostingWrite) {
+    return apiRequest<JobPosting>(`/api/v1/jobs/${targetJobId}/merge`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async function mergeCsvDuplicate(row: JobCsvPreviewRow) {
+    if (!row.data || !row.duplicate_job_id) return;
+    setMergingCsvRow(row.row_number);
+    setError("");
+    try {
+      const merged = await mergeIntoExistingJob(row.duplicate_job_id, row.data);
+      setMergedCsvRows((current) => [...current, row.row_number]);
+      await showSavedJobs([merged], `CSV 第 ${row.row_number} 行的信息已合并到已有岗位；投递记录已保留。`);
+    } catch (cause) {
+      setError(apiMessage(cause));
+    } finally {
+      setMergingCsvRow(null);
+    }
   }
 
   useEffect(() => {
@@ -201,6 +307,12 @@ export default function JobsPage() {
     });
     setCreatePanel(null);
     await showSavedJobs([saved], "岗位已保存。");
+  }
+
+  async function mergeJob(targetJobId: string, payload: JobPostingWrite) {
+    const merged = await mergeIntoExistingJob(targetJobId, payload);
+    setCreatePanel(null);
+    await showSavedJobs([merged], "岗位信息已合并到已有记录；投递状态和阶段历史保持不变。");
   }
 
   async function saveJob(job: JobPosting, payload: JobPostingWrite) {
@@ -290,7 +402,7 @@ export default function JobsPage() {
           </a>
         </div>
         <p className="job-form-hint">
-          支持 UTF-8 或 GB18030 编码，最多 500 条、5 MB。先预览校验结果，再选择要保存的岗位；导入后可继续编辑。
+          支持 UTF-8 或 GB18030 编码，最多 500 条、5 MB。预览时可将重复来源合并到已有岗位，或把文件内重复行合并到首行，再选择要保存的岗位。
         </p>
         <form className="csv-upload-row" onSubmit={previewCsv}>
           <label>
@@ -301,6 +413,7 @@ export default function JobsPage() {
                 setCsvFile(event.target.files?.[0] ?? null);
                 setCsvPreview(null);
                 setSelectedCsvRows([]);
+                setMergedCsvRows([]);
               }}
               type="file"
             />
@@ -359,6 +472,27 @@ export default function JobsPage() {
                           {row.status === "ready" ? "可导入" : row.status === "duplicate" ? "重复来源" : "需要修正"}
                         </strong>
                         {row.duplicate_detail && <small>{row.duplicate_detail}</small>}
+                        {row.duplicate_job_id && <small>目标岗位：{row.duplicate_job_company_name || "未填写公司"} · {row.duplicate_job_title || "未填写职位"}</small>}
+                        {row.duplicate_job_id && <button
+                          className="job-quiet-action"
+                          disabled={mergingCsvRow === row.row_number || mergedCsvRows.includes(row.row_number)}
+                          onClick={() => void mergeCsvDuplicate(row)}
+                          type="button"
+                        >
+                          {mergedCsvRows.includes(row.row_number)
+                            ? "已合并"
+                            : mergingCsvRow === row.row_number ? "合并中…" : "合并到已有岗位"}
+                        </button>}
+                        {row.duplicate_of_row_number && <button
+                          className="job-quiet-action"
+                          disabled={mergedCsvRows.includes(row.row_number)}
+                          onClick={() => mergeCsvDuplicateIntoRow(row)}
+                          type="button"
+                        >
+                          {mergedCsvRows.includes(row.row_number)
+                            ? `已并入第 ${row.duplicate_of_row_number} 行`
+                            : `合并到第 ${row.duplicate_of_row_number} 行`}
+                        </button>}
                         {row.errors.map((message) => <small key={message}>{message}</small>)}
                       </td>
                     </tr>
@@ -385,7 +519,7 @@ export default function JobsPage() {
 
       {createPanel === "new" && <section className="profile-panel job-form-panel">
         <div className="profile-panel-heading"><h2>新增岗位</h2></div>
-        <JobEditor onSave={createJob} onCancel={() => setCreatePanel(null)} />
+        <JobEditor onSave={createJob} onMerge={mergeJob} onCancel={() => setCreatePanel(null)} />
       </section>}
 
       {createPanel === "extract" && <section className="profile-panel job-form-panel" id="job-extraction-panel">

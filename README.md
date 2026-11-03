@@ -52,7 +52,7 @@ ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:3000:127.0.0.1:3000 user@server
 
 简历支持 PDF、DOCX 上传和文本粘贴，单文件最大 10 MB。上传文件保存在私有目录，数据库保存元信息和提取出的文本；解析结果默认待确认，只有用户确认后才能供后续匹配使用。
 
-在岗位管理页可下载 CSV 模板，填写后上传并预览逐行校验结果；可选择校验通过的行批量导入。支持 UTF-8/GB18030 编码，最多 500 条岗位、5 MB；已有或同一文件内重复的来源链接会标记为重复，导入后的岗位可在列表编辑。
+在岗位管理页可下载 CSV 模板，填写后上传并预览逐行校验结果；可选择校验通过的行批量导入。支持 UTF-8/GB18030 编码，最多 500 条岗位、5 MB。已有来源链接重复时，可选择把新增/CSV 信息合并到已有岗位；同一文件内重复的行可合并到首条预览行。合并会保留目标岗位已有的非空字段，只补空字段，并合并去重技能和标签；目标岗位 ID、投递记录与阶段历史不变。冲突字段保留目标值，用户可随后在岗位卡片编辑。
 
 岗位页默认展示一个列表，新增岗位和 CSV 导入按需展开。点击某张岗位卡片的“编辑”，会在该卡片内展开表单，保存或取消后收起；投递阶段、简历版本、备注、下一步与历史也在同一张卡片维护。手动录入的岗位不再显示“待核验/已核验”标签或核验按钮，信息不足时直接编辑补充。
 
@@ -199,6 +199,7 @@ uv run scripts/check_agent_job_visibility.py
 - `GET /api/v1/resumes/{id}`、`POST /api/v1/resumes/{id}/confirm`、`DELETE /api/v1/resumes/{id}`：预览、确认或删除当前用户的简历版本。
 - `GET/POST /api/v1/jobs`、`GET/PUT/DELETE /api/v1/jobs/{id}`：筛选、录入、更新或删除岗位；岗位来源链接按用户去重。
 - `GET /api/v1/jobs/import/template`、`POST /api/v1/jobs/import/preview`、`POST /api/v1/jobs/import`：下载岗位 CSV 模板、预览校验并原子批量保存选中的岗位。
+- `POST /api/v1/jobs/{id}/merge`：把来源链接相同的岗位字段补充到当前用户已有岗位；不会覆盖其非空字段或投递记录。
 - `POST/PUT/DELETE /api/v1/jobs/{id}/application`：创建、更新或清除岗位卡片中的投递记录。
 - `GET /api/v1/jobs/{id}/application/history`：查看用户确认的阶段变更记录。
 - `POST /api/v1/agent/job-extractions`：创建岗位原文抽取任务；`GET /api/v1/agent/tasks`、`GET /api/v1/agent/tasks/{id}` 查询当前用户的任务。
@@ -212,4 +213,4 @@ uv run scripts/check_agent_job_visibility.py
 - `GET/POST /api/v1/reminders`：读取提醒中心或创建岗位开放、截止、测评、面试及跟进提醒；创建请求支持幂等键。
 - `POST /api/v1/reminders/{id}/complete`、`/cancel`、`/pause`、`/resume`、`/snooze`、`/retry`：完成、取消、暂停/恢复、延期或重试提醒。
 - `POST /api/v1/notifications/{id}/read`：将当前用户的站内通知标为已读。
-- `POST /api/v1/agent/tasks/{id}/confirm`：应用用户核对后的字段并保存岗位；`GET /api/v1/agent/jobs/{job_id}/evidence` 查看来源原文和字段引用。
+- `POST /api/v1/agent/tasks/{id}/confirm`：应用用户核对后的字段并保存岗位；如来源重复，可在确认请求中提供 `merge_into_job_id`，将字段和原文引用并入已有岗位。`GET /api/v1/agent/jobs/{job_id}/evidence` 查看来源原文和字段引用。

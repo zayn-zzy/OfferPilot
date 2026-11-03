@@ -424,10 +424,13 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .csv-preview-table a { color: var(--teal); font-weight: 700; }
 .csv-preview-table td:last-child { min-width: 155px; }
 .csv-preview-table small { margin-top: 4px; display: block; color: #8d5d35; line-height: 1.5; }
+.csv-preview-table .job-quiet-action { display: block; margin-top: 6px; white-space: nowrap; }
 .csv-row-ready { color: #28675b; }
 .csv-row-duplicate { color: #916b31; }
 .csv-row-invalid { color: #a34949; }
 .csv-preview-actions { margin-top: 13px; }
+.job-duplicate-merge { display: grid; justify-items: start; gap: 8px; padding: 14px; border: 1px solid #dfd2ae; border-radius: 10px; background: #fffcf5; color: var(--ink); font-size: 12px; line-height: 1.65; }
+.job-duplicate-merge p { margin: 0; }
 .job-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .job-editor fieldset, .application-editor fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 .job-field-wide { grid-column: span 2; }

@@ -183,14 +183,16 @@ def _to_read(
     )
 
 
-def _duplicate_source_error() -> HTTPException:
-    """Give an actionable duplicate-source response without merging silently."""
+def _duplicate_source_error(existing_job: JobPosting) -> HTTPException:
+    """Identify the existing owner-scoped record so the client can offer a merge."""
 
     return HTTPException(
         status_code=status.HTTP_409_CONFLICT,
-        detail=(
-            "这个来源链接已在你的岗位列表中，请编辑已有岗位或检查来源链接后再保存。"
-        ),
+        detail={
+            "code": "duplicate_job_source",
+            "message": "这个来源链接已在你的岗位列表中。可以把新信息合并到已有岗位。",
+            "existing_job_id": str(existing_job.id),
+        },
     )
 
 
@@ -210,6 +212,60 @@ def _assign_job_fields(job: JobPosting, payload: JobPostingWrite) -> None:
     job.source_type = payload.source_type
     job.tags = payload.tags
     job.source_captured_at = datetime.now(timezone.utc)
+
+
+def _merge_job_payload(
+    session: Session,
+    user: User,
+    job: JobPosting,
+    payload: JobPostingWrite,
+) -> Company | None:
+    """Fill missing job/company fields while preserving the existing application record."""
+
+    for field in (
+        "title",
+        "city",
+        "job_type",
+        "batch",
+        "deadline",
+        "education_requirement",
+        "description",
+    ):
+        current_value = getattr(job, field)
+        incoming_value = getattr(payload, field)
+        if current_value in (None, "") and incoming_value not in (None, ""):
+            setattr(job, field, incoming_value)
+
+    for field in ("required_skills", "tags"):
+        current_values = list(getattr(job, field) or [])
+        seen = {item.casefold() for item in current_values}
+        for item in getattr(payload, field):
+            if item.casefold() not in seen:
+                current_values.append(item)
+                seen.add(item.casefold())
+        setattr(job, field, current_values)
+
+    company = session.get(Company, job.company_id) if job.company_id else None
+    if company is None and payload.company_name:
+        company = _company_for_payload(
+            session, user, payload, preserve_existing_details=True
+        )
+        if company is not None:
+            job.company_id = company.id
+    elif company is not None and payload.company_name:
+        if payload.company_name.casefold() == company.normalized_name:
+            for field, incoming_value in (
+                ("website_url", payload.company_website_url),
+                ("recruitment_url", payload.recruitment_url),
+                ("industry", payload.industry),
+                ("notes", payload.company_notes),
+            ):
+                if (
+                    getattr(company, field) in (None, "")
+                    and incoming_value not in (None, "")
+                ):
+                    setattr(company, field, incoming_value)
+    return company
 
 
 @router.get("", response_model=list[JobPostingRead])
@@ -322,14 +378,18 @@ def preview_job_csv(
     except JobCsvImportError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    existing_sources = set(
-        session.scalars(
-            select(JobPosting.normalized_source_url).where(
-                JobPosting.user_id == user.id,
-                JobPosting.normalized_source_url.is_not(None),
-            )
+    existing_sources: dict[str, tuple[JobPosting, Company | None]] = {}
+    existing_rows = session.execute(
+        select(JobPosting, Company)
+        .outerjoin(Company, Company.id == JobPosting.company_id)
+        .where(
+            JobPosting.user_id == user.id,
+            JobPosting.normalized_source_url.is_not(None),
         )
     )
+    for job, company in existing_rows:
+        if job.normalized_source_url:
+            existing_sources[job.normalized_source_url] = (job, company)
     seen_sources: dict[str, int] = {}
     preview_rows: list[JobCsvPreviewRowRead] = []
     for row in parsed_rows:
@@ -338,16 +398,35 @@ def preview_job_csv(
             "ready" if payload is not None and not row.errors else "invalid"
         )
         duplicate_detail = None
+        duplicate_job_id = None
+        duplicate_job_company_name = None
+        duplicate_job_title = None
+        duplicate_of_row_number = None
         if payload is not None:
             normalized_url = _normalize_source_url(payload.source_url)
-            if normalized_url and normalized_url in existing_sources:
+            if row_status == "ready" and normalized_url in existing_sources:
                 row_status = "duplicate"
                 duplicate_detail = "该来源链接已存在于你的岗位列表"
-            elif normalized_url and normalized_url in seen_sources:
+                duplicate_job, duplicate_company = existing_sources[normalized_url]
+                duplicate_job_id = duplicate_job.id
+                duplicate_job_company_name = (
+                    duplicate_company.name if duplicate_company else None
+                )
+                duplicate_job_title = duplicate_job.title
+            elif row_status == "ready" and normalized_url in seen_sources:
                 row_status = "duplicate"
                 duplicate_detail = f"与 CSV 第 {seen_sources[normalized_url]} 行的来源链接重复"
-            elif normalized_url:
+                duplicate_of_row_number = seen_sources[normalized_url]
+            elif row_status == "ready" and normalized_url:
                 seen_sources[normalized_url] = row.row_number
+                duplicate_job_id = None
+                duplicate_of_row_number = None
+            else:
+                duplicate_job_id = None
+                duplicate_of_row_number = None
+        else:
+            duplicate_job_id = None
+            duplicate_of_row_number = None
         preview_rows.append(
             JobCsvPreviewRowRead(
                 row_number=row.row_number,
@@ -364,6 +443,10 @@ def preview_job_csv(
                 data=payload,
                 errors=row.errors,
                 duplicate_detail=duplicate_detail,
+                duplicate_job_id=duplicate_job_id,
+                duplicate_job_company_name=duplicate_job_company_name,
+                duplicate_job_title=duplicate_job_title,
+                duplicate_of_row_number=duplicate_of_row_number,
             )
         )
 
@@ -462,13 +545,14 @@ def create_job(
 
     enforce_same_origin(request, settings)
     normalized_source_url = _normalize_source_url(payload.source_url)
-    if normalized_source_url and session.scalar(
-        select(JobPosting.id).where(
+    duplicate_job = session.scalar(
+        select(JobPosting).where(
             JobPosting.user_id == user.id,
             JobPosting.normalized_source_url == normalized_source_url,
         )
-    ):
-        raise _duplicate_source_error()
+    ) if normalized_source_url else None
+    if duplicate_job:
+        raise _duplicate_source_error(duplicate_job)
     company_row = _company_for_payload(session, user, payload, preserve_existing_details=True)
     job = JobPosting(
         user_id=user.id,
@@ -482,12 +566,59 @@ def create_job(
     except IntegrityError:
         session.rollback()
         if normalized_source_url:
-            raise _duplicate_source_error() from None
+            duplicate_job = session.scalar(
+                select(JobPosting).where(
+                    JobPosting.user_id == user.id,
+                    JobPosting.normalized_source_url == normalized_source_url,
+                )
+            )
+            if duplicate_job:
+                raise _duplicate_source_error(duplicate_job) from None
         raise HTTPException(
             status_code=409, detail="公司信息冲突，请刷新后重试"
         ) from None
     session.refresh(job)
     return _to_read(job, company_row, None)
+
+
+@router.post("/{job_id}/merge", response_model=JobPostingRead)
+def merge_job_into_existing(
+    job_id: UUID,
+    payload: JobPostingWrite,
+    request: Request,
+    user: Annotated[User, Depends(current_user_dependency)],
+    session: Annotated[Session, Depends(session_dependency)],
+    settings: Annotated[Settings, Depends(settings_dependency)],
+) -> JobPostingRead:
+    """Merge a duplicate source into an existing job without replacing its identity."""
+
+    enforce_same_origin(request, settings)
+    job = _owned_job(session, user, job_id)
+    incoming_source = _normalize_source_url(payload.source_url)
+    if not incoming_source or incoming_source != job.normalized_source_url:
+        raise HTTPException(
+            status_code=409,
+            detail="只能把来源链接与目标岗位相同的信息合并到该岗位。",
+        )
+    company = _merge_job_payload(session, user, job, payload)
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="公司信息发生并发冲突，请刷新岗位列表后重试。",
+        ) from None
+    session.refresh(job)
+    if company is not None:
+        session.refresh(company)
+    application = session.scalar(
+        select(Application).where(
+            Application.job_id == job.id,
+            Application.user_id == user.id,
+        )
+    )
+    return _to_read(job, company, application)
 
 
 @router.get("/{job_id}", response_model=JobPostingRead)
@@ -525,14 +656,18 @@ def update_job(
     old_title = job.title
     old_company_id = job.company_id
     normalized_source_url = _normalize_source_url(payload.source_url)
-    if normalized_source_url and session.scalar(
-        select(JobPosting.id).where(
+    duplicate_job = session.scalar(
+        select(JobPosting).where(
             JobPosting.user_id == user.id,
             JobPosting.normalized_source_url == normalized_source_url,
             JobPosting.id != job.id,
         )
-    ):
-        raise _duplicate_source_error()
+    ) if normalized_source_url else None
+    if duplicate_job:
+        raise HTTPException(
+            status_code=409,
+            detail="该来源链接已关联其他岗位。请取消本次编辑，再从新增岗位入口选择合并目标。",
+        )
     company_row = _company_for_payload(session, user, payload)
     job.company_id = company_row.id if company_row else None
     _assign_job_fields(job, payload)
@@ -551,7 +686,17 @@ def update_job(
     except IntegrityError:
         session.rollback()
         if normalized_source_url:
-            raise _duplicate_source_error() from None
+            duplicate_job = session.scalar(
+                select(JobPosting).where(
+                    JobPosting.user_id == user.id,
+                    JobPosting.normalized_source_url == normalized_source_url,
+                    JobPosting.id != job.id,
+                )
+            )
+            raise HTTPException(
+                status_code=409,
+                detail="该来源链接已关联其他岗位。请取消本次编辑，再从新增岗位入口选择合并目标。",
+            ) from None
         raise HTTPException(
             status_code=409, detail="公司信息冲突，请刷新后重试"
         ) from None

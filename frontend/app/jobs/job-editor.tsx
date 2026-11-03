@@ -1,7 +1,12 @@
 "use client";
 
 import { type FormEvent, useState } from "react";
-import type { JobPosting, JobPostingWrite } from "@/lib/api";
+import {
+  apiRequest,
+  duplicateJobIdFromError,
+  type JobPosting,
+  type JobPostingWrite,
+} from "@/lib/api";
 
 type JobDraft = Omit<JobPostingWrite, "required_skills" | "tags"> & {
   required_skills: string;
@@ -55,13 +60,15 @@ function makePayload(draft: JobDraft): JobPostingWrite {
 type JobEditorProps = {
   job?: JobPosting;
   onSave: (payload: JobPostingWrite) => Promise<void>;
+  onMerge?: (targetJobId: string, payload: JobPostingWrite) => Promise<void>;
   onCancel: () => void;
 };
 
-export default function JobEditor({ job, onSave, onCancel }: JobEditorProps) {
+export default function JobEditor({ job, onSave, onMerge, onCancel }: JobEditorProps) {
   const [draft, setDraft] = useState(() => makeDraft(job));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [duplicateTarget, setDuplicateTarget] = useState<JobPosting | null>(null);
 
   function update(field: Exclude<keyof JobDraft, "source_type">, value: string) {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -70,11 +77,33 @@ export default function JobEditor({ job, onSave, onCancel }: JobEditorProps) {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    setDuplicateTarget(null);
     setSaving(true);
     try {
       await onSave(makePayload(draft));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "保存失败，请重试。");
+      const duplicateJobId = !job ? duplicateJobIdFromError(cause) : null;
+      if (duplicateJobId) {
+        try {
+          setDuplicateTarget(await apiRequest<JobPosting>(`/api/v1/jobs/${duplicateJobId}`));
+        } catch {
+          // Keep the actionable conflict message if the target cannot be loaded.
+        }
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function mergeIntoExisting() {
+    if (!duplicateTarget || !onMerge) return;
+    setSaving(true);
+    setError("");
+    try {
+      await onMerge(duplicateTarget.id, makePayload(draft));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "合并岗位信息失败，请重试。");
     } finally {
       setSaving(false);
     }
@@ -108,6 +137,14 @@ export default function JobEditor({ job, onSave, onCancel }: JobEditorProps) {
           <button className="button button-secondary" onClick={onCancel} type="button">取消</button>
         </div>
       </fieldset>
+      {duplicateTarget && onMerge && <div className="job-duplicate-merge" role="status">
+        <strong>发现已有岗位</strong>
+        <p>“{duplicateTarget.company_name || "未填写公司"} · {duplicateTarget.title || "未填写职位"}”使用了相同来源链接。</p>
+        <p>合并会保留已有非空字段，仅补齐空字段；技能和标签会去重合并。已有投递记录与阶段历史保持不变。</p>
+        <button className="button button-primary" disabled={saving} onClick={() => void mergeIntoExisting()} type="button">
+          {saving ? "正在合并…" : "合并到这个岗位"}
+        </button>
+      </div>}
       {error && <p className="form-error" role="alert">{error}</p>}
     </form>
   );

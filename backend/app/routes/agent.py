@@ -38,6 +38,8 @@ from app.routes.jobs import (
     _assign_job_fields,
     _company_for_payload,
     _duplicate_source_error,
+    _merge_job_payload,
+    _owned_job,
     _normalize_source_url,
     _to_read,
 )
@@ -1205,7 +1207,9 @@ def confirm_job_extraction(
         key: field.get("value")
         for key, field in run.result.get("fields", {}).items()
     }
-    overrides = payload.model_dump(exclude_unset=True)
+    overrides = payload.model_dump(
+        exclude_unset=True, exclude={"merge_into_job_id"}
+    )
     candidate_fields.update(overrides)
     source_url = run.source_url
     if "source_url" in overrides:
@@ -1224,13 +1228,70 @@ def confirm_job_extraction(
         source_type="agent",
     )
     normalized_source_url = _normalize_source_url(job_payload.source_url)
-    if normalized_source_url and session.scalar(
-        select(JobPosting.id).where(
+    merge_target = (
+        _owned_job(session, user, payload.merge_into_job_id)
+        if payload.merge_into_job_id
+        else None
+    )
+    if merge_target is not None:
+        if (
+            not normalized_source_url
+            or merge_target.normalized_source_url != normalized_source_url
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="只能把来源链接与目标岗位相同的信息合并到该岗位。",
+            )
+        company = _merge_job_payload(session, user, merge_target, job_payload)
+        session.add(
+            JobSourceEvidence(
+                user_id=user.id,
+                job_id=merge_target.id,
+                agent_run_id=run.id,
+                source_url=job_payload.source_url,
+                source_text=run.input_text,
+                field_evidence=run.result["fields"],
+                captured_at=run.created_at,
+            )
+        )
+        run.job_id = merge_target.id
+        run.status = "confirmed"
+        run.input_text = ""
+        run.finished_at = utc_now()
+        _append_event(
+            run,
+            "confirmed",
+            "岗位字段和来源引用已合并到已有岗位。",
+            job_id=str(merge_target.id),
+            merged=True,
+        )
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="保存合并结果时发生并发冲突，请重新打开任务后重试。",
+            ) from None
+        session.refresh(merge_target)
+        if company is not None:
+            session.refresh(company)
+        application = session.scalar(
+            select(Application).where(
+                Application.job_id == merge_target.id,
+                Application.user_id == user.id,
+            )
+        )
+        return _to_read(merge_target, company, application)
+
+    duplicate_job = session.scalar(
+        select(JobPosting).where(
             JobPosting.user_id == user.id,
             JobPosting.normalized_source_url == normalized_source_url,
         )
-    ):
-        raise _duplicate_source_error()
+    ) if normalized_source_url else None
+    if duplicate_job:
+        raise _duplicate_source_error(duplicate_job)
 
     company = _company_for_payload(session, user, job_payload, preserve_existing_details=True)
     job = JobPosting(
@@ -1263,7 +1324,14 @@ def confirm_job_extraction(
     except IntegrityError:
         session.rollback()
         if normalized_source_url:
-            raise _duplicate_source_error() from None
+            duplicate_job = session.scalar(
+                select(JobPosting).where(
+                    JobPosting.user_id == user.id,
+                    JobPosting.normalized_source_url == normalized_source_url,
+                )
+            )
+            if duplicate_job:
+                raise _duplicate_source_error(duplicate_job) from None
         raise HTTPException(status_code=409, detail="保存岗位失败，请刷新后重试。") from None
     session.refresh(job)
     if company is not None:

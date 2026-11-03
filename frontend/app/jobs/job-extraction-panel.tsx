@@ -1,7 +1,13 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { apiRequest, type AgentTask, type AgentTaskEvent, type JobPosting } from "@/lib/api";
+import {
+  apiRequest,
+  duplicateJobIdFromError,
+  type AgentTask,
+  type AgentTaskEvent,
+  type JobPosting,
+} from "@/lib/api";
 
 type JobFieldDraft = {
   company_name: string;
@@ -86,6 +92,7 @@ export default function JobExtractionPanel({ onJobCreated, onCancel }: JobExtrac
   const [text, setText] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
   const [task, setTask] = useState<AgentTask | null>(null);
+  const [duplicateTarget, setDuplicateTarget] = useState<JobPosting | null>(null);
   const [events, setEvents] = useState<AgentTaskEvent[]>([]);
   const [draft, setDraft] = useState<JobFieldDraft>(emptyDraft);
   const [submitting, setSubmitting] = useState(false);
@@ -250,8 +257,7 @@ export default function JobExtractionPanel({ onJobCreated, onCancel }: JobExtrac
     }
   }
 
-  async function confirm(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function saveConfirmedJob(mergeIntoJobId?: string) {
     if (!task) return;
     setSaving(true);
     setError("");
@@ -265,6 +271,7 @@ export default function JobExtractionPanel({ onJobCreated, onCancel }: JobExtrac
         deadline: draft.deadline || null,
         education_requirement: draft.education_requirement.trim() || null,
         required_skills: draft.required_skills.split(/[、,，]/).map((item) => item.trim()).filter(Boolean),
+        ...(mergeIntoJobId ? { merge_into_job_id: mergeIntoJobId } : {}),
       };
       const job = await apiRequest<JobPosting>(`/api/v1/agent/tasks/${task.id}/confirm`, {
         method: "POST",
@@ -273,9 +280,23 @@ export default function JobExtractionPanel({ onJobCreated, onCancel }: JobExtrac
       onJobCreated(job);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "保存岗位失败。");
+      const duplicateJobId = duplicateJobIdFromError(cause);
+      if (duplicateJobId) {
+        try {
+          setDuplicateTarget(await apiRequest<JobPosting>(`/api/v1/jobs/${duplicateJobId}`));
+        } catch {
+          // Keep the conflict message if the existing job cannot be loaded.
+        }
+      }
     } finally {
       setSaving(false);
     }
+  }
+
+  async function confirm(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setDuplicateTarget(null);
+    await saveConfirmedJob();
   }
 
   function updateDraft(key: keyof JobFieldDraft, value: string) {
@@ -284,6 +305,7 @@ export default function JobExtractionPanel({ onJobCreated, onCancel }: JobExtrac
 
   function startAnother() {
     setTask(null);
+    setDuplicateTarget(null);
     setEvents([]);
     setDraft(emptyDraft());
     setText("");
@@ -331,6 +353,14 @@ export default function JobExtractionPanel({ onJobCreated, onCancel }: JobExtrac
               </label>;
             })}
           </div>
+          {duplicateTarget && <div className="job-duplicate-merge" role="status">
+            <strong>发现已有岗位</strong>
+            <p>“{duplicateTarget.company_name || "未填写公司"} · {duplicateTarget.title || "未填写职位"}”使用了相同来源链接。</p>
+            <p>合并将保留已有非空字段、补齐空字段并合并技能/标签；投递记录保持不变。本次原文和字段引用也会关联到该岗位。</p>
+            <button className="button button-primary" disabled={saving} onClick={() => void saveConfirmedJob(duplicateTarget.id)} type="button">
+              {saving ? "正在合并…" : "合并并保存来源依据"}
+            </button>
+          </div>}
           <div className="job-extraction-actions"><button className="button button-primary" disabled={saving} type="submit">{saving ? "保存中…" : "确认并保存岗位"}</button><button className="button button-secondary" onClick={onCancel} type="button">取消</button></div>
         </form>}
         {error && <p className="form-error" role="alert">{error}</p>}

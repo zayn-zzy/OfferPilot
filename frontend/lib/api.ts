@@ -8,10 +8,19 @@ export type User = {
 export type UserTimezoneUpdate = { user: User; recalculated_reminders: number };
 
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number | null) {
+  constructor(message: string, readonly status: number | null, readonly detail: unknown = null) {
     super(message);
     this.name = "ApiError";
   }
+}
+
+export function duplicateJobIdFromError(cause: unknown): string | null {
+  if (!(cause instanceof ApiError) || cause.status !== 409) return null;
+  if (typeof cause.detail !== "object" || cause.detail === null) return null;
+  const detail = cause.detail as { code?: unknown; existing_job_id?: unknown };
+  return detail.code === "duplicate_job_source" && typeof detail.existing_job_id === "string"
+    ? detail.existing_job_id
+    : null;
 }
 
 export const APPLICATION_STAGES = [
@@ -152,6 +161,10 @@ export type JobCsvPreviewRow = {
   data: JobPostingWrite | null;
   errors: string[];
   duplicate_detail: string | null;
+  duplicate_job_id: string | null;
+  duplicate_job_company_name: string | null;
+  duplicate_job_title: string | null;
+  duplicate_of_row_number: number | null;
 };
 
 export type JobCsvPreview = {
@@ -609,7 +622,7 @@ export async function apiRequest<T = void>(path: string, options: RequestInit = 
     const message = response.status >= 500 && !hasMigrationHint && !safeProviderFailure
       ? `后端返回 HTTP ${response.status}，请检查 API 服务日志。`
       : detailMessage ?? `请求失败（HTTP ${response.status}）。`;
-    throw new ApiError(message, response.status);
+    throw new ApiError(message, response.status, detail);
   }
 
   if (response.status === 204) return undefined as T;
