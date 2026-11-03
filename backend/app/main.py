@@ -119,20 +119,26 @@ def create_app(
             if engine is not None and inspect(engine).has_table("agent_runs"):
                 with factory() as session:
                     stale_runs = session.query(AgentRun).filter(
-                        AgentRun.status.in_(("queued", "running"))
+                        AgentRun.status.in_(("queued", "running", "cancelling"))
                     )
                     for run in stale_runs:
-                        run.status = "failed"
-                        run.error_code = "interrupted_by_restart"
-                        run.error_message = "API 服务重启，中断了任务；你可以重试。"
+                        was_cancelling = run.status == "cancelling"
+                        interruption_message = (
+                            "API 服务重启，取消请求已完成；未保存模型结果。"
+                            if was_cancelling
+                            else "API 服务重启，中断了任务；你可以重试。"
+                        )
+                        run.status = "cancelled" if was_cancelling else "failed"
+                        run.error_code = None if was_cancelling else "interrupted_by_restart"
+                        run.error_message = None if was_cancelling else interruption_message
                         run.finished_at = utc_now()
                         run.events = [
                             *(run.events or []),
                             {
                                 "id": len(run.events or []) + 1,
-                                "event": "failed",
-                                "message": run.error_message,
-                                "code": run.error_code,
+                                "event": "cancelled" if was_cancelling else "failed",
+                                "message": interruption_message,
+                                **({"code": run.error_code} if run.error_code else {}),
                                 "created_at": utc_now().isoformat(),
                             },
                         ]

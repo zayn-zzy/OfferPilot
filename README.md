@@ -64,7 +64,7 @@ ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:3000:127.0.0.1:3000 user@server
 
 复制 `.env.example` 到仓库根目录 `.env` 并配置 `OFFERPILOT_LLM_BASE_URL`、`OFFERPILOT_LLM_API_KEY` 与 `OFFERPILOT_LLM_MODEL`，Compose API 会读取这些变量。直接本地启动 API 时，把相同变量放在 `backend/.env`。支持以 `/v1` 结尾的 API 根地址，或直接提供 `/v1/chat/completions` 地址。密钥只在 API 进程内读取，不通过设置接口或任务响应返回。未配置时任务会显示明确失败原因，配置完成后可重试。
 
-提取任务会将状态、进度事件、尝试次数、模型名和安全错误摘要保存在数据库中；前端通过 SSE 读取实时进度，也会从任务 API 恢复状态。失败任务最多尝试 3 次；进程重启导致的排队/运行中任务会转为失败并可重试。当前阶段使用 FastAPI 进程内后台任务；第 6 步引入 Celery/Redis 后再将执行迁移到持久化队列。这个抽取过程没有浏览器抓取工具，也不执行外部写操作。
+提取任务会将状态、进度事件、尝试次数、模型名和安全错误摘要保存在数据库中；前端通过 SSE 读取实时进度，也会从任务 API 恢复状态。排队任务可立即取消；运行中的任务会等待当前模型请求返回后丢弃结果并完成取消。失败任务最多尝试 3 次；进程重启导致的排队/运行中任务会转为失败并可重试，正在取消的任务会转为已取消。当前阶段使用 FastAPI 进程内后台任务；第 6 步引入 Celery/Redis 后再将执行迁移到持久化队列。这个抽取过程没有浏览器抓取工具，也不执行外部写操作。
 
 ### 第 4 步：个人资料 RAG 与岗位匹配
 
@@ -202,8 +202,8 @@ uv run scripts/check_agent_job_visibility.py
 - `POST/PUT/DELETE /api/v1/jobs/{id}/application`：创建、更新或清除岗位卡片中的投递记录。
 - `GET /api/v1/jobs/{id}/application/history`：查看用户确认的阶段变更记录。
 - `POST /api/v1/agent/job-extractions`：创建岗位原文抽取任务；`GET /api/v1/agent/tasks`、`GET /api/v1/agent/tasks/{id}` 查询当前用户的任务。
-- `GET /api/v1/agent/tasks/{id}/events`：SSE 进度流；`POST /api/v1/agent/tasks/{id}/retry` 重试失败任务；`GET /api/v1/agent/tasks/{id}/source` 读取待确认原文。
-- `DELETE /api/v1/agent/tasks/{id}`：删除未确认的失败/成功任务及其暂存原文；已确认任务需删除关联岗位。
+- `GET /api/v1/agent/tasks/{id}/events`：SSE 进度流；`POST /api/v1/agent/tasks/{id}/retry` 重试失败任务，`POST /api/v1/agent/tasks/{id}/cancel` 取消排队或运行中的提取任务；`GET /api/v1/agent/tasks/{id}/source` 读取待确认原文。
+- `DELETE /api/v1/agent/tasks/{id}`：删除未确认的失败/成功/已取消任务及其暂存原文；排队、运行或取消中的任务不可删除；已确认任务需删除关联岗位。
 - `GET /api/v1/jobs/{id}/match`：只读地根据当前档案、最新已确认简历和岗位信息返回透明的条件/技能比对。
 - `POST /api/v1/jobs/{id}/match`：经统一 Agent 路由运行同一规则匹配，将状态、证据结果和失败原因保存到当前用户的运行记录；匹配仍不调用模型或计算录用概率。
 - `GET/POST /api/v1/knowledge/notes`、`PUT/DELETE /api/v1/knowledge/notes/{id}`：管理当前用户的求职笔记。

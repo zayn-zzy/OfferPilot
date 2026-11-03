@@ -25,6 +25,26 @@ const FIELD_LABELS: Record<keyof JobFieldDraft, string> = {
   required_skills: "技能要求",
 };
 
+const TASK_STATUS_LABEL: Record<AgentTask["status"], string> = {
+  queued: "排队中",
+  running: "运行中",
+  cancelling: "取消中",
+  cancelled: "已取消",
+  succeeded: "待核对",
+  failed: "失败",
+  confirmed: "已保存",
+};
+
+const TASK_HEADING: Record<AgentTask["status"], string> = {
+  queued: "任务排队中",
+  running: "正在提取",
+  cancelling: "正在取消",
+  cancelled: "任务已取消",
+  succeeded: "提取完成，请核对",
+  failed: "提取失败",
+  confirmed: "岗位已保存",
+};
+
 function emptyDraft(): JobFieldDraft {
   return {
     company_name: "",
@@ -69,11 +89,12 @@ export default function JobExtractionPanel({ onJobCreated, onCancel }: JobExtrac
   const [events, setEvents] = useState<AgentTaskEvent[]>([]);
   const [draft, setDraft] = useState<JobFieldDraft>(emptyDraft);
   const [submitting, setSubmitting] = useState(false);
+  const [canceling, setCanceling] = useState(false);
   const [saving, setSaving] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const active = task?.status === "queued" || task?.status === "running";
+  const active = task?.status === "queued" || task?.status === "running" || task?.status === "cancelling";
   const needsReview = useMemo(() => new Set(task?.result?.needs_review_fields ?? []), [task]);
 
   useEffect(() => {
@@ -125,6 +146,7 @@ export default function JobExtractionPanel({ onJobCreated, onCancel }: JobExtrac
     eventSource.addEventListener("progress", receive as EventListener);
     eventSource.addEventListener("completed", receive as EventListener);
     eventSource.addEventListener("failed", receive as EventListener);
+    eventSource.addEventListener("cancelled", receive as EventListener);
 
     const poll = window.setInterval(() => {
       void apiRequest<AgentTask>(`/api/v1/agent/tasks/${task.id}`)
@@ -175,6 +197,28 @@ export default function JobExtractionPanel({ onJobCreated, onCancel }: JobExtrac
       if (retried.status === "succeeded") setDraft(draftFromTask(retried));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "任务重试失败。");
+    }
+  }
+
+  async function cancelTask() {
+    if (!task) return;
+    setCanceling(true);
+    setError("");
+    try {
+      const updated = await apiRequest<AgentTask>(`/api/v1/agent/tasks/${task.id}/cancel`, { method: "POST" });
+      setTask(updated);
+      setEvents(updated.events);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "取消岗位解析任务失败。");
+      try {
+        const current = await apiRequest<AgentTask>(`/api/v1/agent/tasks/${task.id}`);
+        setTask(current);
+        setEvents(current.events);
+      } catch {
+        // Keep the current view; the active-task poll will retry the authoritative state.
+      }
+    } finally {
+      setCanceling(false);
     }
   }
 
@@ -263,13 +307,15 @@ export default function JobExtractionPanel({ onJobCreated, onCancel }: JobExtrac
 
       {task && <div className="agent-task-state">
         <div className="agent-task-heading">
-          <div><p className="eyebrow">岗位信息提取</p><h3>{task.status === "queued" ? "任务排队中" : task.status === "running" ? "正在提取" : task.status === "succeeded" ? "提取完成，请核对" : task.status === "confirmed" ? "岗位已保存" : "提取失败"}</h3></div>
-          <span className={`agent-task-status agent-task-${task.status}`}>{({ queued: "排队中", running: "运行中", succeeded: "待核对", failed: "失败", confirmed: "已保存" })[task.status]}</span>
+          <div><p className="eyebrow">岗位信息提取</p><h3>{TASK_HEADING[task.status]}</h3></div>
+          <span className={`agent-task-status agent-task-${task.status}`}>{TASK_STATUS_LABEL[task.status]}</span>
         </div>
         <ol className="agent-task-events" aria-label="任务进度">
           {(events.length ? events : task.events).map((item) => <li key={item.id}><span>{item.message}</span><time>{new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(item.created_at))}</time></li>)}
         </ol>
-        {active && <p className="job-form-hint">任务状态会保存在账户中；关闭页面后重新打开此面板可继续查看。</p>}
+        {active && task.status !== "cancelling" && <div className="job-extraction-actions"><p className="job-form-hint">任务状态会保存在账户中；关闭页面后重新打开此面板可继续查看。</p><button className="button button-secondary" disabled={canceling} onClick={() => void cancelTask()} type="button">{canceling ? "正在取消…" : "取消解析"}</button></div>}
+        {task.status === "cancelling" && <p className="job-form-hint">正在等待当前模型请求结束；返回内容不会保存。</p>}
+        {task.status === "cancelled" && <><p className="job-form-hint">任务已取消，模型结果未保存。你可以清理记录后重新提交。</p><button className="job-quiet-action danger-text" onClick={() => void deleteTask()} type="button">清理已取消任务并新建</button></>}
         {task.status === "failed" && <div className="agent-task-error"><p role="alert">{task.error_message || "任务失败。"}</p><p>尝试次数：{task.attempt_count}/3。修正模型配置或等待服务恢复后可重试。</p><button className="button button-primary" disabled={task.attempt_count >= 3} onClick={() => void retry()} type="button">重试</button></div>}
         {task.status === "failed" && <button className="job-quiet-action danger-text" onClick={() => void deleteTask()} type="button">清理失败任务并新建</button>}
         {task.status === "succeeded" && task.result && <form className="job-extraction-review" onSubmit={confirm}>

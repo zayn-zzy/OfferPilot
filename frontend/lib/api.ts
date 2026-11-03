@@ -343,7 +343,7 @@ export type ExtractedJobField = {
 
 export type AgentTaskEvent = {
   id: number;
-  event: "progress" | "completed" | "failed" | "confirmed" | "telemetry";
+  event: "progress" | "completed" | "failed" | "confirmed" | "cancelled" | "telemetry";
   message: string;
   step?: string;
   code?: string;
@@ -378,7 +378,7 @@ export type AgentTaskEvent = {
 export type AgentTask = {
   id: string;
   task_type: "job_extraction";
-  status: "queued" | "running" | "succeeded" | "failed" | "confirmed";
+  status: "queued" | "running" | "cancelling" | "cancelled" | "succeeded" | "failed" | "confirmed";
   source_url: string | null;
   result: {
     fields: Record<string, ExtractedJobField>;

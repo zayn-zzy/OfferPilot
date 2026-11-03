@@ -383,6 +383,8 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .agent-task-heading h3 { margin: 0; font-size: 18px; }
 .agent-task-status { padding: 6px 9px; border-radius: 7px; color: #61756d; background: #f0f5f1; font-size: 11px; }
 .agent-task-succeeded, .agent-task-confirmed { color: #28675b; background: #e8f4ed; }
+.agent-task-cancelling { color: #8b6a34; background: #fff5df; }
+.agent-task-cancelled { color: #61756d; background: #f0f5f1; }
 .agent-task-failed { color: #a34949; background: #fbebeb; }
 .agent-task-events { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
 .agent-task-events li { padding: 9px 0; display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid #edf1ed; color: var(--ink); font-size: 12px; }

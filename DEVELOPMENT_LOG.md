@@ -573,3 +573,23 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 - `tests/test_agent_telemetry.py tests/test_agent_workflow.py tests/test_agent_workspace.py`：14 项通过，覆盖 request ID 绑定、Chat/Embedding/Tavily 计量、传输失败记录、正文不落库、任务事件持久化和工作区汇总。
 - `tests/test_task_planner.py tests/test_skills.py`：16 项通过；岗位抽取、Embedding、Tavily 与公司摘要 Provider 定向回归：8 项通过。
 - Python `compileall`、前端 `bun run typecheck`、`git diff --check` 通过。未调用真实服务；费率需由使用者按当前服务商价格配置，估算不替代账单。
+
+## PRD §5.1：岗位抽取任务取消
+
+### 完成内容
+
+- 提取面板增加“取消解析”。排队任务立即标记已取消，统一工作流看到非排队状态后会跳过模型调用。
+- 运行中的任务记录取消请求并显示“取消中”；当前 Provider 请求返回后，不论成功还是失败，都将任务完成为已取消且不保存解析结果。取消接口对重复请求幂等，已完成或已保存的任务不能取消。
+- SSE 以 `cancelled` 事件结束；取消期间任务不能删除或被新的任务额度释放。API 重启时，取消中的任务按已取消收敛，原文与结果仍遵循现有账户隔离和清理规则。
+- 更新 API/TypeScript 状态类型、面板状态提示、README 接口说明。未增加数据库字段或迁移。
+
+### 技术与上一模块的区别
+
+上一模块为统一 Agent 路由增加耗时、Token 与费用观测；本次处理任务生命周期控制。取消采用持久化的 `cancelling → cancelled` 状态与 SSE 事件，后台 handler 在写成功结果或失败状态前重新读取取消状态，避免用户请求取消后保存模型输出。当前 HTTP Provider 调用无法被服务端强行中断，因此运行中取消是协作式取消：会等待该请求返回，但结果不会进入业务数据。
+
+### 验证
+
+- `tests/test_agent.py`：新增覆盖运行中取消后丢弃成功响应、排队取消后不调用 Provider。
+- 定向 Agent 生命周期测试：5 项通过，覆盖运行中取消遇到成功/失败响应、排队取消跳过 Provider、统一路由派发与非排队任务跳过。
+- Python `compileall`、前端 `bun run typecheck`、取消路由 OpenAPI 注册检查及 `git diff --check` 通过。
+- 整份 `tests/test_agent.py` 未能完成：已有的首个 ASGI 集成用例卡在注册账户请求阶段，尚未进入岗位抽取；取消流程使用独立 Provider/SQLite 生命周期测试验证。

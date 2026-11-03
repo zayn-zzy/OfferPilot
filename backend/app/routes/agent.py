@@ -69,7 +69,7 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 MAX_ATTEMPTS = 3
 MAX_ACTIVE_TASKS_PER_USER = 3
 MAX_TASK_PLAN_ATTEMPTS = 3
-TERMINAL_STATUSES = {"succeeded", "failed", "confirmed"}
+TERMINAL_STATUSES = {"succeeded", "failed", "confirmed", "cancelled"}
 AGENT_WORKSPACE_CAPABILITIES = (
     AgentCapabilityRead(
         id="reminder_plan",
@@ -177,10 +177,15 @@ def _append_event(run: AgentRun, event: str, message: str, **details: object) ->
     run.updated_at = utc_now()
 
 
-def _owned_task(session: Session, user: User, task_id: UUID) -> AgentRun:
-    run = session.scalar(
-        select(AgentRun).where(AgentRun.id == task_id, AgentRun.user_id == user.id)
+def _owned_task(
+    session: Session, user: User, task_id: UUID, *, for_update: bool = False
+) -> AgentRun:
+    statement = select(AgentRun).where(
+        AgentRun.id == task_id, AgentRun.user_id == user.id
     )
+    if for_update:
+        statement = statement.with_for_update()
+    run = session.scalar(statement)
     if run is None or run.task_type != "job_extraction":
         raise HTTPException(status_code=404, detail="Agent 任务不存在")
     return run
@@ -829,7 +834,9 @@ async def run_job_extraction(
     """Run one persisted task and record each transition before continuing."""
 
     with session_factory() as session:
-        run = session.get(AgentRun, task_id)
+        run = session.scalar(
+            select(AgentRun).where(AgentRun.id == task_id).with_for_update()
+        )
         if run is None or run.status != "queued":
             return
         run.status = "running"
@@ -864,8 +871,16 @@ async def run_job_extraction(
             ):
                 review_fields.append(field_name)
         with session_factory() as session:
-            run = session.get(AgentRun, task_id)
-            if run is None or run.status != "running":
+            run = session.scalar(
+                select(AgentRun).where(AgentRun.id == task_id).with_for_update()
+            )
+            if run is None:
+                return
+            if run.status == "cancelling":
+                _finish_job_extraction_cancellation(run)
+                session.commit()
+                return
+            if run.status != "running":
                 return
             run.result = {"fields": fields, "needs_review_fields": review_fields}
             run.model_name = model_name
@@ -883,8 +898,16 @@ async def run_job_extraction(
         return
 
     with session_factory() as session:
-        run = session.get(AgentRun, task_id)
-        if run is None or run.status != "running":
+        run = session.scalar(
+            select(AgentRun).where(AgentRun.id == task_id).with_for_update()
+        )
+        if run is None:
+            return
+        if run.status == "cancelling":
+            _finish_job_extraction_cancellation(run)
+            session.commit()
+            return
+        if run.status != "running":
             return
         run.status = "failed"
         run.error_code = failure_code
@@ -892,6 +915,59 @@ async def run_job_extraction(
         run.finished_at = utc_now()
         _append_event(run, "failed", failure_message, code=failure_code)
         session.commit()
+
+
+def _finish_job_extraction_cancellation(run: AgentRun) -> None:
+    """Finalize a cooperative cancellation after the provider call returns."""
+
+    run.status = "cancelled"
+    run.finished_at = utc_now()
+    run.error_code = None
+    run.error_message = None
+    _append_event(
+        run,
+        "cancelled",
+        "取消已完成；模型返回内容未保存。",
+        step="cancelled",
+    )
+
+
+@router.post("/tasks/{task_id}/cancel", response_model=AgentTaskRead)
+def cancel_agent_task(
+    task_id: UUID,
+    request: Request,
+    user: Annotated[User, Depends(current_user_dependency)],
+    session: Annotated[Session, Depends(session_dependency)],
+    settings: Annotated[Settings, Depends(settings_dependency)],
+) -> AgentTaskRead:
+    """Cancel a queued extraction immediately or request cooperative cancellation."""
+
+    enforce_same_origin(request, settings)
+    run = _owned_task(session, user, task_id, for_update=True)
+    if run.status in {"cancelling", "cancelled"}:
+        return _task_read(run)
+    if run.status == "queued":
+        run.status = "cancelled"
+        run.finished_at = utc_now()
+        _append_event(
+            run,
+            "cancelled",
+            "排队任务已取消，模型服务未调用。",
+            step="cancelled",
+        )
+    elif run.status == "running":
+        run.status = "cancelling"
+        _append_event(
+            run,
+            "progress",
+            "已请求取消；正在等待当前模型请求结束，返回内容不会保存。",
+            step="cancel_requested",
+        )
+    else:
+        raise HTTPException(status_code=409, detail="当前岗位解析任务无法取消。")
+    session.commit()
+    session.refresh(run)
+    return _task_read(run)
 
 
 @router.post(
@@ -913,7 +989,7 @@ def create_job_extraction(
     active_count = session.scalar(
         select(func.count(AgentRun.id)).where(
             AgentRun.user_id == user.id,
-            AgentRun.status.in_(("queued", "running")),
+            AgentRun.status.in_(("queued", "running", "cancelling")),
         )
     )
     if active_count and active_count >= MAX_ACTIVE_TASKS_PER_USER:
@@ -1087,7 +1163,7 @@ def delete_agent_task(
 
     enforce_same_origin(request, settings)
     run = _owned_task(session, user, task_id)
-    if run.status in {"queued", "running"}:
+    if run.status in {"queued", "running", "cancelling"}:
         raise HTTPException(status_code=409, detail="运行中的任务不能删除，请等待任务结束。")
     if run.status == "confirmed":
         raise HTTPException(status_code=409, detail="请删除关联岗位以一并删除来源依据和任务记录。")

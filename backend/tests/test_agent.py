@@ -1,5 +1,6 @@
 """Agent task lifecycle, evidence validation, and owner-isolated API tests."""
 
+import asyncio
 from collections.abc import AsyncGenerator, Generator
 import json
 from pathlib import Path
@@ -12,10 +13,12 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+from starlette.requests import Request
 
 from app.core.config import Settings
 from app.main import create_app
-from app.models import AgentRun, Base, JobSourceEvidence
+from app.models import AgentRun, Base, JobSourceEvidence, User
+from app.routes.agent import cancel_agent_task, run_job_extraction
 from app.services.job_extraction import (
     ExtractedDateField,
     ExtractedSkillsField,
@@ -60,6 +63,36 @@ class FakeProvider:
         if self.calls <= self.failures:
             raise JobExtractionError("provider_timeout", "模型服务响应超时，请重试。")
         return candidate(city_confidence=0.42), "test-model"
+
+
+class BlockingProvider:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.calls = 0
+        self.fail = fail
+
+    async def extract(self, source_text: str, settings: Settings):
+        self.calls += 1
+        self.started.set()
+        await self.release.wait()
+        if self.fail:
+            raise JobExtractionError("provider_timeout", "模型服务响应超时，请重试。")
+        return candidate(), "test-model"
+
+
+def cancellation_request(test_app: FastAPI, task_id: UUID) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": f"/api/v1/agent/tasks/{task_id}/cancel",
+            "headers": [(b"origin", b"http://localhost:3000")],
+            "query_string": b"",
+            "scheme": "http",
+            "app": test_app,
+        }
+    )
 
 
 @pytest.fixture
@@ -263,6 +296,109 @@ async def test_failed_task_can_be_deleted_to_remove_retained_source_text(
     assert deleted.status_code == 204
     assert (await client.get(f"/api/v1/agent/tasks/{task_id}")).status_code == 404
     assert (await client.get(f"/api/v1/agent/tasks/{task_id}/source")).status_code == 404
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("fail_after_cancel", [False, True])
+async def test_running_extraction_cancellation_discards_provider_result(
+    test_app: FastAPI, fail_after_cancel: bool
+) -> None:
+    with test_app.state.session_factory() as session:
+        owner = User(
+            email="agent-cancel@example.com",
+            password_hash="unused",
+            timezone="Asia/Shanghai",
+        )
+        session.add(owner)
+        session.flush()
+        run = AgentRun(
+            user_id=owner.id,
+            task_type="job_extraction",
+            status="queued",
+            input_text=SOURCE_TEXT,
+            events=[],
+        )
+        session.add(run)
+        session.commit()
+        session.refresh(run)
+        task_id = run.id
+
+    provider = BlockingProvider(fail=fail_after_cancel)
+    runner = asyncio.create_task(
+        run_job_extraction(
+            task_id,
+            test_app.state.session_factory,
+            test_app.state.settings,
+            provider,
+        )
+    )
+    await asyncio.wait_for(provider.started.wait(), timeout=2)
+
+    with test_app.state.session_factory() as session:
+        owner = session.scalar(select(User).where(User.email == "agent-cancel@example.com"))
+        assert owner is not None
+        pending = cancel_agent_task(
+            task_id,
+            cancellation_request(test_app, task_id),
+            owner,
+            session,
+            test_app.state.settings,
+        )
+        assert pending.status == "cancelling"
+        assert pending.events[-1]["step"] == "cancel_requested"
+
+    provider.release.set()
+    await asyncio.wait_for(runner, timeout=2)
+    with test_app.state.session_factory() as session:
+        stored = session.get(AgentRun, task_id)
+        assert stored is not None
+        assert stored.status == "cancelled"
+        assert stored.result is None
+        assert [event["event"] for event in stored.events][-1] == "cancelled"
+        assert stored.finished_at is not None
+
+
+@pytest.mark.anyio
+async def test_queued_extraction_cancellation_skips_provider(
+    test_app: FastAPI,
+) -> None:
+    with test_app.state.session_factory() as session:
+        owner = User(
+            email="agent-cancel-queued@example.com",
+            password_hash="unused",
+            timezone="Asia/Shanghai",
+        )
+        session.add(owner)
+        session.flush()
+        run = AgentRun(
+            user_id=owner.id,
+            task_type="job_extraction",
+            status="queued",
+            input_text=SOURCE_TEXT,
+            events=[],
+        )
+        session.add(run)
+        session.commit()
+        session.refresh(run)
+        task_id = run.id
+        cancelled = cancel_agent_task(
+            task_id,
+            cancellation_request(test_app, task_id),
+            owner,
+            session,
+            test_app.state.settings,
+        )
+        assert cancelled.status == "cancelled"
+        assert cancelled.events[-1]["step"] == "cancelled"
+
+    provider = BlockingProvider()
+    await run_job_extraction(
+        task_id,
+        test_app.state.session_factory,
+        test_app.state.settings,
+        provider,
+    )
+    assert provider.calls == 0
 
 
 @pytest.mark.anyio

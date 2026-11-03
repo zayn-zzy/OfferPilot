@@ -458,7 +458,9 @@ class AgentTaskRead(BaseModel):
 
     id: UUID
     task_type: Literal["job_extraction"]
-    status: Literal["queued", "running", "succeeded", "failed", "confirmed"]
+    status: Literal[
+        "queued", "running", "cancelling", "cancelled", "succeeded", "failed", "confirmed"
+    ]
     source_url: str | None
     result: dict | None
     events: list[dict]
