@@ -9,10 +9,11 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+from starlette.requests import Request
 
 from app.core.config import Settings
 from app.main import create_app
-from app.models import AgentRun, ApprovalRequest, Base, JobPosting, User, utc_now
+from app.models import AgentRun, ApprovalRequest, Base, Company, JobPosting, User, utc_now
 from app.services.agent_workflow import (
     AgentWorkflowState,
     SUPPORTED_AGENT_WORKFLOWS,
@@ -20,6 +21,13 @@ from app.services.agent_workflow import (
     build_agent_workflow_graph,
 )
 from app.services.job_extraction import JobExtractionError
+from app.services.company_research import (
+    CompanyResearchDraft,
+    CompanyResearchError,
+    CompanyResearchFindingCandidate,
+    PublicSearchSource,
+)
+from app.routes.research import research_company_for_job
 
 
 @pytest.fixture
@@ -105,6 +113,45 @@ def add_run(
 class FailingJobExtractionProvider:
     async def extract(self, source_text: str, settings: Settings):
         raise JobExtractionError("test_provider_failure", "Expected test failure.")
+
+
+class FakeCompanySearchProvider:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.queries: list[str] = []
+
+    async def search(self, query: str, count: int, settings: Settings):
+        assert count == 8
+        assert "测试公司" in query
+        if self.fail:
+            raise CompanyResearchError("research_rate_limited", "Expected test failure.")
+        self.queries.append(query)
+        return [
+            PublicSearchSource(
+                source_id="source-1",
+                title="测试公司校园招聘",
+                url="https://jobs.example.com/campus",
+                excerpt="测试公司 2027 届校园招聘现已启动。",
+            )
+        ]
+
+
+class FakeCompanyResearchSummarizer:
+    async def summarize(self, company_name, job_title, query, sources, settings):
+        assert company_name == "测试公司"
+        assert job_title == "后端工程师"
+        return (
+            CompanyResearchDraft(
+                findings=[
+                    CompanyResearchFindingCandidate(
+                        claim="测试公司已启动 2027 届校园招聘。",
+                        source_id="source-1",
+                        quote="测试公司 2027 届校园招聘现已启动。",
+                    )
+                ]
+            ),
+            "test-research-model",
+        )
 
 
 @pytest.mark.anyio
@@ -275,3 +322,144 @@ async def test_app_router_runs_registered_job_extraction_handler(
         assert stored.attempt_count == 1
         assert stored.error_code == "test_provider_failure"
         assert stored.events[0]["step"] == "workflow_routed"
+
+
+@pytest.mark.anyio
+async def test_app_router_runs_company_research_with_verified_sources(
+    workflow_context: dict[str, object],
+) -> None:
+    with workflow_context["factory"]() as session:
+        owner = session.get(User, workflow_context["owner_id"])
+        job = session.get(JobPosting, workflow_context["job_id"])
+        assert owner is not None and job is not None
+        company = Company(
+            id=uuid4(),
+            user_id=owner.id,
+            name="测试公司",
+            normalized_name="测试公司",
+        )
+        session.add(company)
+        session.flush()
+        job.company_id = company.id
+        session.commit()
+
+    search_provider = FakeCompanySearchProvider()
+    app = create_app(
+        Settings(
+            _env_file=None,
+            environment="test",
+            database_url="sqlite://",
+            secret_key="company-workflow-test-secret-that-is-long-enough",
+        ),
+        workflow_context["factory"],
+        company_research_search_provider=search_provider,
+        company_research_summarizer=FakeCompanyResearchSummarizer(),
+    )
+    path = f"/api/v1/jobs/{workflow_context['job_id']}/research"
+    request = Request(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": b"",
+            "headers": [(b"origin", b"http://localhost:3000")],
+            "client": ("testclient", 123),
+            "server": ("testserver", 80),
+            "app": app,
+        }
+    )
+    with workflow_context["factory"]() as session:
+        owner = session.get(User, workflow_context["owner_id"])
+        assert owner is not None
+        response = await research_company_for_job(
+            workflow_context["job_id"],
+            request,
+            owner,
+            session,
+            app.state.settings,
+        )
+
+    assert response.company_name == "测试公司"
+    assert response.findings[0].source_id == "source-1"
+    assert len(search_provider.queries) == 1
+    with workflow_context["factory"]() as session:
+        owner = session.get(User, workflow_context["owner_id"])
+        assert owner is not None
+        cached_response = await research_company_for_job(
+            workflow_context["job_id"],
+            request,
+            owner,
+            session,
+            app.state.settings,
+        )
+    assert cached_response.run_id == response.run_id
+    assert len(search_provider.queries) == 1
+
+    with workflow_context["factory"]() as session:
+        stored = session.get(AgentRun, response.run_id)
+        assert stored is not None
+        assert stored.status == "succeeded"
+        assert stored.attempt_count == 1
+        assert stored.model_name == "test-research-model"
+        assert stored.result["findings"][0]["source_id"] == "source-1"
+        assert [event["step"] for event in stored.events] == [
+            "queued",
+            "workflow_routed",
+            "public_search",
+            "summarize",
+            "completed",
+        ]
+
+
+@pytest.mark.anyio
+async def test_company_research_failure_is_saved_by_unified_router(
+    workflow_context: dict[str, object],
+) -> None:
+    with workflow_context["factory"]() as session:
+        owner = session.get(User, workflow_context["owner_id"])
+        job = session.get(JobPosting, workflow_context["job_id"])
+        assert owner is not None and job is not None
+        company = Company(
+            id=uuid4(),
+            user_id=owner.id,
+            name="测试公司",
+            normalized_name="测试公司",
+        )
+        session.add(company)
+        session.flush()
+        job.company_id = company.id
+        run = add_run(session, owner, "company_research")
+        run.job_id = job.id
+        run.input_text = '"测试公司" 招聘 校招 官方'
+        session.commit()
+
+    app = create_app(
+        Settings(
+            _env_file=None,
+            environment="test",
+            database_url="sqlite://",
+            secret_key="company-workflow-failure-secret-is-long-enough",
+        ),
+        workflow_context["factory"],
+        company_research_search_provider=FakeCompanySearchProvider(fail=True),
+        company_research_summarizer=FakeCompanyResearchSummarizer(),
+    )
+    with pytest.raises(HTTPException) as error:
+        await app.state.agent_workflow_graph.ainvoke(
+            {"task_type": "company_research", "run_id": run.id, "operation": "run"},
+            version="v2",
+        )
+    assert error.value.status_code == 503
+    assert error.value.detail["code"] == "research_rate_limited"
+
+    with workflow_context["factory"]() as session:
+        stored = session.get(AgentRun, run.id)
+        assert stored is not None
+        assert stored.status == "failed"
+        assert stored.attempt_count == 1
+        assert stored.error_code == "research_rate_limited"
+        assert stored.events[-1]["event"] == "failed"

@@ -6,8 +6,9 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from mcp.server import MCPServer
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
 from app.models import AgentRun, Company, JobPosting, User, utc_now
@@ -21,6 +22,7 @@ from app.schemas import CompanyResearchRead
 from app.services.company_research import (
     CompanyResearchError,
     CompanyResearchFindingCandidate,
+    CompanyResearchSummaryProvider,
     call_company_search_tool,
     validate_research_findings,
 )
@@ -95,6 +97,233 @@ def _owned_job_and_company(
     return job, company
 
 
+def _mark_research_failed(
+    run: AgentRun,
+    code: str,
+    message: str,
+    step: str,
+) -> None:
+    run.status = "failed"
+    run.error_code = code
+    run.error_message = message
+    run.finished_at = utc_now()
+    _append_research_event(run, "failed", message, step)
+
+
+async def run_company_research_workflow(
+    run_id: UUID,
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+    mcp_server: MCPServer,
+    summarizer: CompanyResearchSummaryProvider,
+) -> None:
+    """Run a persisted, owner-scoped company research task and save its evidence."""
+
+    with session_factory() as session:
+        run = session.get(AgentRun, run_id)
+        if (
+            run is None
+            or run.task_type != "company_research"
+            or run.status != "queued"
+        ):
+            return
+
+        job = session.scalar(
+            select(JobPosting).where(
+                JobPosting.id == run.job_id,
+                JobPosting.user_id == run.user_id,
+            )
+        )
+        company = (
+            session.scalar(
+                select(Company).where(
+                    Company.id == job.company_id,
+                    Company.user_id == run.user_id,
+                )
+            )
+            if job is not None and job.company_id is not None
+            else None
+        )
+        if job is None or company is None:
+            _mark_research_failed(
+                run,
+                "research_target_unavailable",
+                "岗位或关联公司已不可用，请检查岗位信息后重试。",
+                "load_context",
+            )
+            session.commit()
+            raise HTTPException(
+                status_code=409,
+                detail="岗位或关联公司已不可用，请检查岗位信息后重试。",
+            )
+
+        user_id = run.user_id
+        job_id = job.id
+        company_name = company.name
+        job_title = job.title
+        query = run.input_text
+        run.status = "running"
+        run.attempt_count += 1
+        run.error_code = None
+        run.error_message = None
+        run.finished_at = None
+        _append_research_event(
+            run,
+            "progress",
+            "开始搜索公司公开招聘信息。",
+            "public_search",
+        )
+        session.commit()
+
+    try:
+        sources, searched_at = await call_company_search_tool(
+            mcp_server,
+            query,
+            count=8,
+        )
+    except CompanyResearchError as exc:
+        with session_factory() as session:
+            run = session.get(AgentRun, run_id)
+            if run is not None and run.status == "running":
+                _mark_research_failed(run, exc.code, exc.message, "public_search")
+                session.commit()
+        logger.warning("Company research run %s failed (%s)", run_id, exc.code)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": exc.code, "message": exc.message, "run_id": str(run_id)},
+        ) from None
+
+    findings: list[CompanyResearchFindingCandidate] = []
+    warning: str | None = None
+    model_name: str | None = None
+    if sources:
+        with session_factory() as session:
+            run = session.get(AgentRun, run_id)
+            if run is None or run.status != "running":
+                raise HTTPException(
+                    status_code=409,
+                    detail="研究任务状态已变化，请刷新后重试。",
+                )
+            _append_research_event(
+                run,
+                "progress",
+                "已获得公开搜索结果，正在整理来源摘要。",
+                "summarize",
+            )
+            session.commit()
+        try:
+            candidate, model_name = await summarizer.summarize(
+                company_name,
+                job_title,
+                query,
+                sources,
+                settings,
+            )
+            findings = validate_research_findings(candidate, sources)
+        except CompanyResearchError as exc:
+            warning = exc.message
+            error_code = exc.code
+        except Exception as exc:
+            logger.error(
+                "Company research summarization failed for run %s (%s)",
+                run_id,
+                type(exc).__name__,
+            )
+            warning = (
+                "摘要模型遇到意外错误，已保留搜索来源；"
+                "请查看来源或稍后重试。"
+            )
+            error_code = "research_summary_internal_error"
+        else:
+            error_code = None
+    else:
+        error_code = None
+
+    if findings:
+        summary = "；".join(finding.claim for finding in findings)
+        no_evidence = False
+    elif warning:
+        summary = (
+            "已找到公开来源，但暂时无法生成摘要。"
+            "请先查看来源链接，稍后可重新研究。"
+        )
+        no_evidence = True
+    elif sources:
+        summary = (
+            "已找到公开来源，但其中没有足够的可核验证据形成事实摘要。"
+            "请打开来源人工检查。"
+        )
+        no_evidence = True
+    else:
+        summary = (
+            "公开搜索暂未返回结果。请稍后重试，"
+            "或直接打开公司招聘主页核对。"
+        )
+        no_evidence = True
+
+    result = {
+        "company_name": company_name,
+        "query": query,
+        "job_title": job_title,
+        "researched_at": searched_at.isoformat(),
+        "summary": summary,
+        "findings": [finding.model_dump(mode="json") for finding in findings],
+        "sources": [source.model_dump(mode="json") for source in sources],
+        "no_evidence": no_evidence,
+        "warning": warning,
+        "search_provider": "tavily_search",
+    }
+    with session_factory() as session:
+        current_run = session.get(AgentRun, run_id)
+        current_job = session.scalar(
+            select(JobPosting).where(
+                JobPosting.id == job_id,
+                JobPosting.user_id == user_id,
+            )
+        )
+        current_company = (
+            session.scalar(
+                select(Company).where(
+                    Company.id == current_job.company_id,
+                    Company.user_id == user_id,
+                )
+            )
+            if current_job is not None and current_job.company_id is not None
+            else None
+        )
+        if current_run is None:
+            raise HTTPException(status_code=404, detail="公司研究任务已被删除。")
+        if current_job is None or current_company is None or current_company.name != company_name:
+            _mark_research_failed(
+                current_run,
+                "research_target_changed",
+                "岗位或公司信息在研究期间发生变化，请重新发起研究。",
+                "validate_target",
+            )
+            session.commit()
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "岗位或公司信息在研究期间发生变化，"
+                    "请重新发起研究。"
+                ),
+            )
+
+        current_run.result = result
+        current_run.status = "succeeded"
+        current_run.error_code = error_code
+        current_run.error_message = warning
+        current_run.model_name = model_name
+        current_run.finished_at = utc_now()
+        _append_research_event(
+            current_run,
+            "completed",
+            "公司研究完成，结果保留来源链接和可核验引用。",
+            "completed",
+        )
+        session.commit()
+
+
 @router.post(
     "/{job_id}/research",
     response_model=CompanyResearchRead,
@@ -156,109 +385,44 @@ async def research_company_for_job(
         user_id=user.id,
         job_id=job.id,
         task_type="company_research",
-        status="running",
+        status="queued",
         input_text=query,
         events=[],
-        attempt_count=1,
+        attempt_count=0,
     )
-    _append_research_event(run, "progress", "已创建只读公开搜索任务。", "queued")
+    _append_research_event(
+        run,
+        "progress",
+        "已创建待执行的只读公开搜索任务。",
+        "queued",
+    )
     session.add(run)
     session.commit()
     session.refresh(run)
 
-    try:
-        sources, searched_at = await call_company_search_tool(
-            request.app.state.company_research_mcp_server,
-            query,
-            count=8,
-        )
-    except CompanyResearchError as exc:
-        run.status = "failed"
-        run.error_code = exc.code
-        run.error_message = exc.message
-        run.finished_at = utc_now()
-        _append_research_event(run, "failed", exc.message, "public_search")
-        session.commit()
-        logger.warning("Company research run %s failed (%s)", run.id, exc.code)
+    await request.app.state.agent_workflow_graph.ainvoke(
+        {
+            "task_type": "company_research",
+            "operation": "run",
+            "run_id": run.id,
+        },
+        version="v2",
+    )
+    session.expire_all()
+    completed_run = session.get(AgentRun, run.id)
+    if completed_run is None:
+        raise HTTPException(status_code=404, detail="公司研究任务已被删除。")
+    if completed_run.status != "succeeded":
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"code": exc.code, "message": exc.message, "run_id": str(run.id)},
-        ) from None
-
-    findings: list[CompanyResearchFindingCandidate] = []
-    warning: str | None = None
-    model_name: str | None = None
-    if sources:
-        _append_research_event(run, "progress", "已获得公开搜索结果，正在整理来源摘要。", "summarize")
-        session.commit()
-        try:
-            candidate, model_name = await request.app.state.company_research_summarizer.summarize(
-                company.name,
-                job.title,
-                query,
-                sources,
-                settings,
-            )
-            findings = validate_research_findings(candidate, sources)
-        except CompanyResearchError as exc:
-            warning = exc.message
-            run.error_code = exc.code
-            run.error_message = exc.message
-        except Exception as exc:
-            logger.error(
-                "Company research summarization failed for run %s (%s)",
-                run.id,
-                type(exc).__name__,
-            )
-            warning = "摘要模型遇到意外错误，已保留搜索来源；请查看来源或稍后重试。"
-            run.error_code = "research_summary_internal_error"
-            run.error_message = warning
-
-    current_job = session.scalar(
-        select(JobPosting).where(JobPosting.id == job.id, JobPosting.user_id == user.id)
-    )
-    current_run = session.get(AgentRun, run.id)
-    if current_job is None or current_run is None:
-        session.rollback()
-        raise HTTPException(status_code=404, detail="岗位或研究任务已被删除。")
-
-    if findings:
-        summary = "；".join(finding.claim for finding in findings)
-        no_evidence = False
-    elif warning:
-        summary = "已找到公开来源，但暂时无法生成摘要。请先查看来源链接，稍后可重新研究。"
-        no_evidence = True
-    elif sources:
-        summary = "已找到公开来源，但其中没有足够的可核验证据形成事实摘要。请打开来源人工检查。"
-        no_evidence = True
-    else:
-        summary = "公开搜索暂未返回结果。请稍后重试，或直接打开公司招聘主页核对。"
-        no_evidence = True
-
-    result = {
-        "company_name": company.name,
-        "query": query,
-        "job_title": job.title,
-        "researched_at": searched_at.isoformat(),
-        "summary": summary,
-        "findings": [finding.model_dump(mode="json") for finding in findings],
-        "sources": [source.model_dump(mode="json") for source in sources],
-        "no_evidence": no_evidence,
-        "warning": warning,
-        "search_provider": "tavily_search",
-    }
-    current_run.result = result
-    current_run.status = "succeeded"
-    current_run.model_name = model_name
-    current_run.finished_at = utc_now()
-    _append_research_event(
-        current_run,
-        "completed",
-        "公司研究完成，结果保留来源链接和可核验引用。",
-        "completed",
-    )
-    session.commit()
-    return _response_from_run(current_run, job.id, company.name)
+            detail={
+                "code": completed_run.error_code or "research_workflow_incomplete",
+                "message": completed_run.error_message
+                or "公司研究未能完成，请稍后重试。",
+                "run_id": str(completed_run.id),
+            },
+        )
+    return _response_from_run(completed_run, job.id, company.name)
 
 
 @router.get("/{job_id}/research", response_model=CompanyResearchRead)

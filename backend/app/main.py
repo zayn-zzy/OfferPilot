@@ -30,7 +30,10 @@ from app.routes.jobs import router as jobs_router
 from app.routes.knowledge import router as knowledge_router
 from app.routes.matching import router as matching_router
 from app.routes.profile import router as profile_router
-from app.routes.research import router as research_router
+from app.routes.research import (
+    run_company_research_workflow,
+    router as research_router,
+)
 from app.routes.reminders import router as reminders_router
 from app.routes.reminders import notifications_router
 from app.routes.resumes import router as resumes_router
@@ -169,6 +172,18 @@ def create_app(
         )
         return {}
 
+    async def dispatch_company_research(
+        state: AgentWorkflowState,
+    ) -> dict[str, object]:
+        await run_company_research_workflow(
+            state["run_id"],
+            factory,
+            app_settings,
+            app.state.company_research_mcp_server,
+            app.state.company_research_summarizer,
+        )
+        return {}
+
     async def dispatch_skill_workflow(state: AgentWorkflowState) -> dict[str, object]:
         if state.get("operation", "run") == "resume":
             await resume_skill_workflow(
@@ -193,6 +208,7 @@ def create_app(
     app.state.agent_workflow_graph = build_agent_workflow_graph(
         factory,
         {
+            "company_research": dispatch_company_research,
             "task_plan": dispatch_task_plan,
             "job_extraction": dispatch_job_extraction,
             "skill_workflow": dispatch_skill_workflow,

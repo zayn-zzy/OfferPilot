@@ -498,3 +498,21 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 - `backend/.venv/bin/pytest -o addopts='' -q tests/test_task_planner.py tests/test_skills.py`：16 项通过，回归提醒预览/确认及 Skill 草稿、审批和恢复行为；使用测试 Provider，不调用真实模型。
 - `backend/.venv/bin/python -m compileall -q app tests` 和根目录 `git diff --check` 通过。
 - 额外尝试岗位提取 HTTP/ASGI 全链路测试时，该测试等待未完成后停止，因此不计作通过；本次以应用工厂创建的真实路由图直接调用测试处理器派发。未运行全量后端测试、前端测试、真实模型调用或浏览器联调。
+
+## PRD §5.1、§5.2：公司公开研究接入统一 Agent 路由
+
+### 完成内容
+
+- 将公司研究加入统一 LangGraph 任务类型。岗位研究 API 仍在本次请求内等待结果，返回结构、30 分钟缓存、每账户每小时 10 次限流和搜索失败的 503 语义保持不变；运行记录现在按 queued → running → succeeded/failed 推进。
+- 研究处理器从 `AgentRun` 重新读取所属岗位、公司和搜索词，执行前确认岗位及公司属于同一账户；搜索/摘要期间不把原文放入图状态，最终写入来源、引用、摘要和阶段事件。
+- 研究完成前再次确认岗位和公司没有变化；若目标在搜索期间被删除或改名，任务失败并提示重新研究，避免把旧公司结果写到当前岗位。
+- 继续复用 MCP allowlist 只读搜索、Tavily Provider、摘要模型和引用校验；没有新增表、迁移或对外写操作。
+
+### 技术与上一模块的区别
+
+上一模块已将岗位提取、提醒计划和 Skills 接入统一路由；本次把已有的公司研究管线也改为由 `AgentRun` 任务状态校验后派发。API 的同步等待行为与产品响应不变，搜索与摘要逻辑从路由处理函数中提取为可独立调度的流程，未来可继续纳入统一进度和后台执行策略。
+
+### 验证与限制
+
+- `backend/.venv/bin/pytest -o addopts='' -q tests/test_agent_workflow.py tests/test_task_planner.py tests/test_skills.py`，并运行公司搜索 Provider/MCP 的 6 个定向用例：共 28 项通过，覆盖统一路由、审批绑定、公司研究处理器成功/失败、引用保存、缓存、Skills 与提醒计划。
+- `backend/.venv/bin/python -m compileall -q app tests` 和 `git diff --check` 通过。公司研究既有 HTTP/ASGI 测试在测试环境等待未完成，未计为通过；新增直接调用 API 处理函数的集成测试覆盖了路由派发、结果和缓存。未调用真实 Tavily/LLM 服务或进行浏览器联调。
