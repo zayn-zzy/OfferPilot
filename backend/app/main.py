@@ -21,7 +21,7 @@ from app.db import (
     session_dependency,
 )
 from app.models import AgentRun, Base, utc_now
-from app.routes.agent import router as agent_router
+from app.routes.agent import run_job_extraction, run_task_plan, router as agent_router
 from app.routes.account import router as account_router
 from app.routes.auth import router as auth_router
 from app.routes.companies import router as companies_router
@@ -34,7 +34,11 @@ from app.routes.research import router as research_router
 from app.routes.reminders import router as reminders_router
 from app.routes.reminders import notifications_router
 from app.routes.resumes import router as resumes_router
-from app.routes.skills import router as skills_router
+from app.routes.skills import (
+    resume_skill_workflow,
+    run_skill_workflow,
+    router as skills_router,
+)
 from app.schemas import HealthRead
 from app.services.job_extraction import (
     JobExtractionProvider,
@@ -56,6 +60,10 @@ from app.services.company_research import (
 from app.services.skills import SkillProvider, OpenAICompatibleSkillProvider
 from app.services.task_planner import TaskPlannerProvider, OpenAICompatibleTaskPlanner
 from app.services.skill_graph import in_memory_checkpointer_for
+from app.services.agent_workflow import (
+    AgentWorkflowState,
+    build_agent_workflow_graph,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +150,54 @@ def create_app(
     app.state.skill_provider = skill_provider or OpenAICompatibleSkillProvider()
     app.state.task_planner_provider = task_planner_provider or OpenAICompatibleTaskPlanner()
     app.state.skill_checkpoint_saver = in_memory_checkpointer_for(app_settings.database_url)
+
+    async def dispatch_task_plan(state: AgentWorkflowState) -> dict[str, object]:
+        await run_task_plan(
+            state["run_id"],
+            factory,
+            app_settings,
+            app.state.task_planner_provider,
+        )
+        return {}
+
+    async def dispatch_job_extraction(state: AgentWorkflowState) -> dict[str, object]:
+        await run_job_extraction(
+            state["run_id"],
+            factory,
+            app_settings,
+            app.state.job_extraction_provider,
+        )
+        return {}
+
+    async def dispatch_skill_workflow(state: AgentWorkflowState) -> dict[str, object]:
+        if state.get("operation", "run") == "resume":
+            await resume_skill_workflow(
+                state["run_id"],
+                factory,
+                app_settings,
+                app.state.skill_provider,
+                approval_id=state["approval_id"],
+                decision=state["decision"],
+                checkpoint_saver=app.state.skill_checkpoint_saver,
+            )
+        else:
+            await run_skill_workflow(
+                state["run_id"],
+                factory,
+                app_settings,
+                app.state.skill_provider,
+                app.state.skill_checkpoint_saver,
+            )
+        return {}
+
+    app.state.agent_workflow_graph = build_agent_workflow_graph(
+        factory,
+        {
+            "task_plan": dispatch_task_plan,
+            "job_extraction": dispatch_job_extraction,
+            "skill_workflow": dispatch_skill_workflow,
+        },
+    )
     app.state.company_research_mcp_server = create_company_research_mcp_server(
         app_settings, search_provider
     )

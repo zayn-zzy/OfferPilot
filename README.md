@@ -117,7 +117,7 @@ cd backend
 uv run alembic upgrade head
 ```
 
-Skill 由 API 进程内后台任务触发，并由 LangGraph `StateGraph` 编排“上下文校验 → 草稿生成 → 引用校验 → 人工审批 → 本地保存”节点。`AgentRun` 保存面向产品的状态、步骤、结果和错误；LangGraph checkpointer 保存暂停/恢复所需的图状态。PostgreSQL 使用 LangGraph PostgreSQL checkpointer；SQLite 本地模式将检查点放在 `storage/langgraph-checkpoints.sqlite3`，与业务库分开。图状态只放任务 ID 和审批决定，不放简历或模型草稿正文。
+岗位抽取、提醒计划和 Skills 的持久化任务由 `app.services.agent_workflow` 的统一 LangGraph 路由分发；路由会核对 `AgentRun` 的任务类型与状态。Skills 审批恢复还会校验审批记录、运行记录、账户和决定是否一致。路由图状态只放任务 ID、任务类型、操作类型和审批 ID/决定，不放原文或模型草稿正文。各专属流程仍负责自身的处理步骤和业务写入；例如 Skill 由 API 进程内后台任务触发，并由内部 `StateGraph` 编排“上下文校验 → 草稿生成 → 引用校验 → 人工审批 → 本地保存”。`AgentRun` 保存面向产品的状态、步骤、结果和错误；LangGraph checkpointer 保存暂停/恢复所需的图状态。PostgreSQL 使用 LangGraph PostgreSQL checkpointer；SQLite 本地模式将检查点放在 `storage/langgraph-checkpoints.sqlite3`，与业务库分开。图调用使用 LangGraph v2 异步结果格式；Skill 适配层会保留现有审批中断返回结构。
 
 `application_prep_pack` 在人工审批节点暂停；用户批准后，执行 API 使用同一 `thread_id` 恢复图，再次校验审批有效期、岗位归属和草稿哈希后才保存。API 重启时，尚未完成的 `queued/running` 任务会标记失败并允许手动重试；审批暂停状态和检查点可留存以供恢复。FastAPI `BackgroundTasks` 仍不是持久任务队列，提醒投递仍由独立 Celery Worker/Beat 负责。
 

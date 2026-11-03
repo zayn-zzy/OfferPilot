@@ -619,11 +619,20 @@ async def _invoke_skill_graph(
             _SkillGraphNodes(session_factory, settings, provider),
         )
         graph_input = Command(resume=resume) if resume is not None else {"run_id": str(run_id)}
-        return await graph.ainvoke(
+        graph_result = await graph.ainvoke(
             graph_input,
             {"configurable": {"thread_id": _skill_thread_id(run_id, attempt_count)}},
             durability="sync",
+            version="v2",
         )
+        if graph_result.interrupts:
+            if isinstance(graph_result.value, dict):
+                return {
+                    **graph_result.value,
+                    "__interrupt__": list(graph_result.interrupts),
+                }
+            return {"__interrupt__": list(graph_result.interrupts)}
+        return graph_result.value
 
 
 async def run_skill_workflow(
@@ -823,12 +832,9 @@ def create_skill_run(
         return _skill_run_read(existing)
     session.refresh(run)
     background_tasks.add_task(
-        run_skill_workflow,
-        run.id,
-        request.app.state.session_factory,
-        settings,
-        request.app.state.skill_provider,
-        request.app.state.skill_checkpoint_saver,
+        request.app.state.agent_workflow_graph.ainvoke,
+        {"task_type": "skill_workflow", "operation": "run", "run_id": run.id},
+        version="v2",
     )
     return _skill_run_read(run)
 
@@ -882,12 +888,9 @@ def retry_skill_run(
     session.commit()
     session.refresh(run)
     background_tasks.add_task(
-        run_skill_workflow,
-        run.id,
-        request.app.state.session_factory,
-        settings,
-        request.app.state.skill_provider,
-        request.app.state.skill_checkpoint_saver,
+        request.app.state.agent_workflow_graph.ainvoke,
+        {"task_type": "skill_workflow", "operation": "run", "run_id": run.id},
+        version="v2",
     )
     return _skill_run_read(run)
 
@@ -1187,14 +1190,15 @@ async def reject_request(
         session.refresh(approval)
 
     run = _owned_skill_run(session, user, approval.agent_run_id)
-    await resume_skill_workflow(
-        run.id,
-        request.app.state.session_factory,
-        settings,
-        request.app.state.skill_provider,
-        approval_id=approval.id,
-        decision="rejected",
-        checkpoint_saver=request.app.state.skill_checkpoint_saver,
+    await request.app.state.agent_workflow_graph.ainvoke(
+        {
+            "task_type": "skill_workflow",
+            "operation": "resume",
+            "run_id": run.id,
+            "approval_id": approval.id,
+            "decision": "rejected",
+        },
+        version="v2",
     )
     return _approval_read(approval)
 
@@ -1248,14 +1252,15 @@ async def execute_approved_action(
         raise HTTPException(status_code=403, detail="此操作没有可用的执行器。")
 
     run = _owned_skill_run(session, user, approval.agent_run_id)
-    await resume_skill_workflow(
-        run.id,
-        request.app.state.session_factory,
-        settings,
-        request.app.state.skill_provider,
-        approval_id=approval.id,
-        decision="approved",
-        checkpoint_saver=request.app.state.skill_checkpoint_saver,
+    await request.app.state.agent_workflow_graph.ainvoke(
+        {
+            "task_type": "skill_workflow",
+            "operation": "resume",
+            "run_id": run.id,
+            "approval_id": approval.id,
+            "decision": "approved",
+        },
+        version="v2",
     )
     session.expire_all()
     pack = session.scalar(

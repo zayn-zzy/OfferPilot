@@ -489,7 +489,7 @@ async def run_task_plan(
     graph.add_edge("generate_candidate", "validate_and_build_preview")
     graph.add_edge("validate_and_build_preview", "persist_result")
     graph.add_edge("persist_result", END)
-    await graph.compile().ainvoke({"task_id": task_id})
+    await graph.compile().ainvoke({"task_id": task_id}, version="v2")
 
 
 def _owned_task_plan(session: Session, user: User, task_id: UUID) -> AgentRun:
@@ -579,11 +579,9 @@ def create_task_plan(
         return _task_plan_read(existing)
     session.refresh(run)
     background_tasks.add_task(
-        run_task_plan,
-        run.id,
-        request.app.state.session_factory,
-        settings,
-        request.app.state.task_planner_provider,
+        request.app.state.agent_workflow_graph.ainvoke,
+        {"task_type": "task_plan", "operation": "run", "run_id": run.id},
+        version="v2",
     )
     return _task_plan_read(run)
 
@@ -641,11 +639,9 @@ def retry_task_plan(
     session.commit()
     session.refresh(run)
     background_tasks.add_task(
-        run_task_plan,
-        run.id,
-        request.app.state.session_factory,
-        settings,
-        request.app.state.task_planner_provider,
+        request.app.state.agent_workflow_graph.ainvoke,
+        {"task_type": "task_plan", "operation": "run", "run_id": run.id},
+        version="v2",
     )
     return _task_plan_read(run)
 
@@ -895,11 +891,9 @@ def create_job_extraction(
     session.commit()
     session.refresh(run)
     background_tasks.add_task(
-        run_job_extraction,
-        run.id,
-        request.app.state.session_factory,
-        settings,
-        request.app.state.job_extraction_provider,
+        request.app.state.agent_workflow_graph.ainvoke,
+        {"task_type": "job_extraction", "operation": "run", "run_id": run.id},
+        version="v2",
     )
     return _task_read(run)
 
@@ -1030,11 +1024,9 @@ def retry_agent_task(
     session.commit()
     session.refresh(run)
     background_tasks.add_task(
-        run_job_extraction,
-        run.id,
-        request.app.state.session_factory,
-        settings,
-        request.app.state.job_extraction_provider,
+        request.app.state.agent_workflow_graph.ainvoke,
+        {"task_type": "job_extraction", "operation": "run", "run_id": run.id},
+        version="v2",
     )
     return _task_read(run)
 
