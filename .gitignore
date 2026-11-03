@@ -14,6 +14,9 @@ venv/
 .coverage
 htmlcov/
 artifacts/
+backend/evals/datasets/*_acceptance*.jsonl
+backend/evals/datasets/*_acceptance*.csv
+backend/evals/datasets/business_value_observations.csv
 
 # Next.js / JavaScript
 node_modules/

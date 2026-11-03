@@ -98,7 +98,8 @@ def rag_company_cases() -> list[dict[str, object]]:
                 "合成无关资料：团队曾经举办校园招聘宣讲。",
                 "合成无关资料：应聘者可以在官网查看岗位。",
             ]
-            relevant_indexes = {0}
+            # Old topical information cannot support a claim about the current state.
+            relevant_indexes = set()
             expected_mode = "insufficient"
         else:
             number = index + 1

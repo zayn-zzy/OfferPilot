@@ -86,9 +86,19 @@ def score_job_extraction(
         totals.update(tp=tp, fp=fp, fn=fn, exact=exact, fields=count)
 
     successful = len(predictions)
+    dataset_kind = cases[0].dataset_kind if cases else None
+    limitations = []
+    if dataset_kind == "synthetic_smoke_v1":
+        limitations.append(
+            "样本为合成烟雾集，不代表真实招聘语料或 PRD 人工标注验收集。"
+        )
+    if dataset_kind == "human_annotated_acceptance_v1":
+        limitations.append(
+            "人工标注质量与代表性仍需结合标注方案、抽样范围和错误案例审阅。"
+        )
     return {
         "task": "job_extraction",
-        "dataset_kind": "synthetic_smoke_v1",
+        "dataset_kind": dataset_kind,
         "model": model_name,
         "samples": len(cases),
         "successes": successful,
@@ -114,10 +124,7 @@ def score_job_extraction(
         "errors": errors,
         "token_usage": None,
         "cost_estimate": None,
-        "limitations": [
-            "样本为合成烟雾集，不代表真实招聘语料或 PRD 人工标注验收集。",
-            "当前 Provider Adapter 未暴露 token 用量，故不计算费用。",
-        ],
+        "limitations": limitations,
     }
 
 
@@ -163,6 +170,9 @@ def score_rag_case(
         "expected_source_count": len(relevant),
         "retrieved_source_count": len(top_ids),
         "supported_citation_count": len(supported_citations),
+        "fact_supported_citation_count": sum(
+            citation_id in relevant for citation_id in supported_citations
+        ),
         "generated_citation_count": len(generated_citations),
         "conflict_sources_covered": len(relevant.intersection(citation_set)),
     }
@@ -183,7 +193,8 @@ def summarize_rag_scores(
         if score["retrieval_recall_at_k"] is not None
     ]
     generated = sum(score["generated_citation_count"] for score in scores)
-    supported = sum(score["supported_citation_count"] for score in scores)
+    quote_valid = sum(score["supported_citation_count"] for score in scores)
+    fact_supported = sum(score["fact_supported_citation_count"] for score in scores)
     category_rows: dict[str, dict[str, float | int]] = {}
     categories = sorted({case.category for case in cases})
     score_by_category: dict[str, list[dict[str, Any]]] = {
@@ -202,9 +213,23 @@ def summarize_rag_scores(
     security_case_ids = {case.id for case in cases if case.security_probe}
     security_scores = [score for score in scores if score["id"] in security_case_ids]
 
+    dataset_kind = cases[0].dataset_kind if cases else None
+    limitations = [
+        (
+            "冲突/弃答分类依赖可解释的中文标记词，应与人工标注的事实支持指标一起审阅。"
+        ),
+        "引用支持率按标注相关来源 ID 计算；逐字引用正确率单独报告。",
+    ]
+    if dataset_kind == "synthetic_smoke_v1":
+        limitations.insert(0, "样本为合成烟雾集，不代表真实问题的人工标注验收集。")
+    if dataset_kind == "human_annotated_acceptance_v1":
+        limitations.append(
+            "人工标注质量与代表性仍需结合标注方案、抽样范围和错误案例审阅。"
+        )
+
     return {
         "task": "rag_company_research",
-        "dataset_kind": "synthetic_smoke_v1",
+        "dataset_kind": dataset_kind,
         "embedding_model": embedding_model,
         "answer_model": answer_model,
         "samples": len(cases),
@@ -218,7 +243,15 @@ def summarize_rag_scores(
         "retrieval_recall_at_5": round(sum(relevant_scores) / len(relevant_scores), 4)
         if relevant_scores
         else None,
-        "citation_support_rate": round(supported / generated, 4) if generated else None,
+        "citation_quote_validity_rate": round(quote_valid / generated, 4)
+        if generated
+        else None,
+        "citation_support_rate": round(fact_supported / generated, 4)
+        if generated
+        else None,
+        "no_answer_recognition_rate": _category_accuracy(category_rows, "no_answer"),
+        "stale_abstention_rate": _category_accuracy(category_rows, "stale"),
+        "conflict_detection_rate": _category_accuracy(category_rows, "conflict"),
         "latency_seconds": {
             "p50": _percentile(list(latencies.values()), 0.50),
             "p95": _percentile(list(latencies.values()), 0.95),
@@ -237,9 +270,12 @@ def summarize_rag_scores(
         "errors": errors,
         "token_usage": None,
         "cost_estimate": None,
-        "limitations": [
-            "样本为合成烟雾集，不代表真实 RAG / 公司研究问题的人工标注验收集。",
-            "冲突/弃答分类依赖可解释的中文标记词，是烟雾指标，不是完整语义评审。",
-            "当前 Provider Adapter 未暴露 token 用量，故不计算费用。",
-        ],
+        "limitations": limitations,
     }
+
+
+def _category_accuracy(
+    category_rows: dict[str, dict[str, float | int]], category: str
+) -> float | None:
+    row = category_rows.get(category)
+    return float(row["mode_accuracy"]) if row is not None else None

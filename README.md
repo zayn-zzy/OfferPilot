@@ -144,9 +144,9 @@ OFFERPILOT_SMTP_USE_SSL=false
 
 ### Agent 评测烟雾集
 
-`backend/evals/` 提供 50 条岗位抽取和 30 条 RAG/公司研究合成样本，覆盖缺失字段、冲突来源、旧资料、无答案，以及 4 条不可信指令文本安全探针。样本明确标记为 `synthetic_smoke_v1`，只用于验证评测代码和发现回归，不是 PRD 要求的人工标注验收集，也不能用来宣称模型达到验收门槛。当前 Provider Adapter 不暴露 token 用量，报告中的 token 与费用保持空值。
+`backend/evals/` 包含合成烟雾集、PRD 人工验收集校验/运行工具、岗位标注 CSV 转换器和业务提效前后对比报告工具。当前签入的 50 条岗位与 30 条 RAG 样本仍是合成数据，只能用于回归，不能用于宣称验收通过。真实人工数据和使用前后记录尚未收集，因此当前没有真实质量分数或业务效益结论。
 
-不调用模型的本地数据检查：
+先检查合成数据集（不调用模型）：
 
 ```bash
 cd backend
@@ -154,15 +154,14 @@ uv run python -m app.evals.runner --task job_extraction
 uv run python -m app.evals.runner --task rag_company_research
 ```
 
-明确添加 `--live` 才会调用配置的服务商；这可能产生 API 用量和费用。结果默认写入被 Git 忽略的 `backend/artifacts/agent-eval/`：
+人工验收集的标注格式、数据检查、实际运行命令、指标解释，以及业务提效观察表和报告步骤见 [backend/evals/README.md](backend/evals/README.md)。仅明确添加 `--live` 才会调用模型或 Tavily 服务，产生 API 用量和费用；报告会把未知 token 或成本显示为 `null`。
+
+实际验收还需运行外部动作与提醒的零容忍回归检查：
 
 ```bash
 cd backend
-uv run python -m app.evals.runner --task job_extraction --live --limit 3
-uv run python -m app.evals.runner --task rag_company_research --live --limit 3
+uv run pytest -q tests/test_external_actions.py tests/test_reminders.py
 ```
-
-评测设计、指标含义和当前限制见 [backend/evals/README.md](backend/evals/README.md)。
 
 ## 后端开发与测试
 
