@@ -31,7 +31,10 @@ from app.routes.knowledge import (
     run_knowledge_qa_workflow,
     router as knowledge_router,
 )
-from app.routes.matching import router as matching_router
+from app.routes.matching import (
+    run_job_match_workflow,
+    router as matching_router,
+)
 from app.routes.profile import router as profile_router
 from app.routes.research import (
     run_company_research_workflow,
@@ -199,6 +202,10 @@ def create_app(
         )
         return {}
 
+    async def dispatch_job_match(state: AgentWorkflowState) -> dict[str, object]:
+        await run_job_match_workflow(state["run_id"], factory)
+        return {}
+
     async def dispatch_skill_workflow(state: AgentWorkflowState) -> dict[str, object]:
         if state.get("operation", "run") == "resume":
             await resume_skill_workflow(
@@ -224,6 +231,7 @@ def create_app(
         factory,
         {
             "company_research": dispatch_company_research,
+            "job_match": dispatch_job_match,
             "knowledge_qa": dispatch_knowledge_qa,
             "task_plan": dispatch_task_plan,
             "job_extraction": dispatch_job_extraction,

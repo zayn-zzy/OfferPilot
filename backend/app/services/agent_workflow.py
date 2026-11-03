@@ -11,7 +11,12 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.models import AgentRun, ApprovalRequest, utc_now
 
 AgentWorkflowType = Literal[
-    "company_research", "job_extraction", "knowledge_qa", "task_plan", "skill_workflow"
+    "company_research",
+    "job_extraction",
+    "job_match",
+    "knowledge_qa",
+    "task_plan",
+    "skill_workflow",
 ]
 AgentWorkflowOperation = Literal["run", "resume"]
 AgentWorkflowRoute = AgentWorkflowType | Literal["skip"]
@@ -19,6 +24,7 @@ SUPPORTED_AGENT_WORKFLOWS = frozenset(
     {
         "company_research",
         "job_extraction",
+        "job_match",
         "knowledge_qa",
         "task_plan",
         "skill_workflow",

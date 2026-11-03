@@ -182,7 +182,7 @@ export default function JobCard(props: JobCardProps) {
     setMatchLoading(true);
     setError("");
     try {
-      setMatchAnalysis(await apiRequest<JobMatch>(`/api/v1/jobs/${job.id}/match`));
+      setMatchAnalysis(await apiRequest<JobMatch>(`/api/v1/jobs/${job.id}/match`, { method: "POST" }));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "岗位匹配分析失败。");
     } finally {

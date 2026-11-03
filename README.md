@@ -117,7 +117,7 @@ cd backend
 uv run alembic upgrade head
 ```
 
-岗位提取、提醒计划、公司研究、个人资料问答和 Skills 的持久化任务由 `app.services.agent_workflow` 的统一 LangGraph 路由分发；路由会核对 `AgentRun` 的任务类型与状态。公司研究在执行前再次校验岗位和公司归属，继续通过 MCP 调用只读搜索并保留可核验引用；个人资料问答按账户检索已索引的简历和笔记，并校验返回引用确实来自检索片段；Skills 审批恢复还会校验审批记录、运行记录、账户和决定是否一致。路由图状态只放任务 ID、任务类型、操作类型和审批 ID/决定，不放原文或模型草稿正文。各专属流程仍负责自身的处理步骤和业务写入；例如 Skill 由 API 进程内后台任务触发，并由内部 `StateGraph` 编排“上下文校验 → 草稿生成 → 引用校验 → 人工审批 → 本地保存”。`AgentRun` 保存面向产品的状态、步骤、结果和错误；LangGraph checkpointer 保存暂停/恢复所需的图状态。PostgreSQL 使用 LangGraph PostgreSQL checkpointer；SQLite 本地模式将检查点放在 `storage/langgraph-checkpoints.sqlite3`，与业务库分开。图调用使用 LangGraph v2 异步结果格式；Skill 适配层会保留现有审批中断返回结构。
+岗位提取、岗位匹配、提醒计划、公司研究、个人资料问答和 Skills 的持久化任务由 `app.services.agent_workflow` 的统一 LangGraph 路由分发；路由会核对 `AgentRun` 的任务类型与状态。岗位匹配复用确定性规则，对硬性条件、偏好和简历原文证据逐项比较，不调用模型，也不生成录用概率；公司研究在执行前再次校验岗位和公司归属，继续通过 MCP 调用只读搜索并保留可核验引用；个人资料问答按账户检索已索引的简历和笔记，并校验返回引用确实来自检索片段；Skills 审批恢复还会校验审批记录、运行记录、账户和决定是否一致。路由图状态只放任务 ID、任务类型、操作类型和审批 ID/决定，不放原文或模型草稿正文。各专属流程仍负责自身的处理步骤和业务写入；例如 Skill 由 API 进程内后台任务触发，并由内部 `StateGraph` 编排“上下文校验 → 草稿生成 → 引用校验 → 人工审批 → 本地保存”。`AgentRun` 保存面向产品的状态、步骤、结果和错误；LangGraph checkpointer 保存暂停/恢复所需的图状态。PostgreSQL 使用 LangGraph PostgreSQL checkpointer；SQLite 本地模式将检查点放在 `storage/langgraph-checkpoints.sqlite3`，与业务库分开。图调用使用 LangGraph v2 异步结果格式；Skill 适配层会保留现有审批中断返回结构。
 
 `application_prep_pack` 在人工审批节点暂停；用户批准后，执行 API 使用同一 `thread_id` 恢复图，再次校验审批有效期、岗位归属和草稿哈希后才保存。API 重启时，尚未完成的 `queued/running` 任务会标记失败并允许手动重试；审批暂停状态和检查点可留存以供恢复。FastAPI `BackgroundTasks` 仍不是持久任务队列，提醒投递仍由独立 Celery Worker/Beat 负责。
 
@@ -188,7 +188,7 @@ uv run scripts/check_agent_job_visibility.py
 - `POST /api/v1/auth/logout`：退出并清理会话。
 - `GET /api/v1/auth/me`：获取当前账户。
 - `GET /api/v1/dashboard`：按当前账户汇总投递阶段、未来 7 天提醒/跟进、未来 14 天岗位截止日期和最近 5 条 Agent 运行记录。
-- `GET /api/v1/agent/workspace`：返回受支持的 Agent 任务类型、对应入口和最近的岗位提取/公司研究/个人资料问答/Skills 等运行摘要；不返回任务原文或模型结果。
+- `GET /api/v1/agent/workspace`：返回受支持的 Agent 任务类型、对应入口和最近的岗位提取/岗位匹配/公司研究/个人资料问答/Skills 等运行摘要；不返回任务原文或模型结果。
 - `PUT /api/v1/auth/me/timezone`：更新账户 IANA 时区；必须显式确认重新计算所有未来提醒。
 - `GET /api/v1/account/export`：下载当前账户的 ZIP 数据包，包含账户资料、业务记录、解析后的简历文本和服务器仍保存的简历原件；不包含密码哈希、服务 API 密钥或派生向量数值。
 - `DELETE /api/v1/account/me`：永久删除当前账户及其业务记录、向量索引和账户文件；需要再次提交当前密码和账户邮箱。
@@ -202,7 +202,8 @@ uv run scripts/check_agent_job_visibility.py
 - `POST /api/v1/agent/job-extractions`：创建岗位原文抽取任务；`GET /api/v1/agent/tasks`、`GET /api/v1/agent/tasks/{id}` 查询当前用户的任务。
 - `GET /api/v1/agent/tasks/{id}/events`：SSE 进度流；`POST /api/v1/agent/tasks/{id}/retry` 重试失败任务；`GET /api/v1/agent/tasks/{id}/source` 读取待确认原文。
 - `DELETE /api/v1/agent/tasks/{id}`：删除未确认的失败/成功任务及其暂存原文；已确认任务需删除关联岗位。
-- `GET /api/v1/jobs/{id}/match`：根据当前档案、最新已确认简历和岗位信息返回透明的条件/技能比对，不保存派生分数。
+- `GET /api/v1/jobs/{id}/match`：只读地根据当前档案、最新已确认简历和岗位信息返回透明的条件/技能比对。
+- `POST /api/v1/jobs/{id}/match`：经统一 Agent 路由运行同一规则匹配，将状态、证据结果和失败原因保存到当前用户的运行记录；匹配仍不调用模型或计算录用概率。
 - `GET/POST /api/v1/knowledge/notes`、`PUT/DELETE /api/v1/knowledge/notes/{id}`：管理当前用户的求职笔记。
 - `POST /api/v1/knowledge/reindex`：重建当前用户已确认简历与笔记的向量索引。
 - `POST /api/v1/knowledge/ask`：从当前用户已索引的资料中检索片段并返回带原文引用的回答。

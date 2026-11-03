@@ -17,15 +17,18 @@ from app.models import (
     AgentRun,
     ApprovalRequest,
     Base,
+    CandidateProfile,
     Company,
     DocumentChunk,
     JobPosting,
     KnowledgeNote,
+    ResumeVersion,
     User,
     utc_now,
 )
 from app.routes.agent import read_agent_workspace
 from app.routes.knowledge import ask_knowledge
+from app.routes.matching import create_job_match_run
 from app.services.agent_workflow import (
     AgentWorkflowState,
     SUPPORTED_AGENT_WORKFLOWS,
@@ -636,3 +639,120 @@ async def test_knowledge_qa_runs_through_router_and_keeps_owner_citations(
         assert failed.attempt_count == 1
         assert failed.error_code == "embedding_timeout"
         assert failed.events[-1]["event"] == "failed"
+
+
+@pytest.mark.anyio
+async def test_job_match_runs_through_router_and_records_owner_scoped_result(
+    workflow_context: dict[str, object],
+) -> None:
+    with workflow_context["factory"]() as session:
+        owner = session.get(User, workflow_context["owner_id"])
+        other = session.get(User, workflow_context["other_id"])
+        job = session.get(JobPosting, workflow_context["job_id"])
+        assert owner is not None and other is not None and job is not None
+        job.city = "上海"
+        job.education_requirement = "本科及以上"
+        job.required_skills = ["Python", "Java"]
+        session.add(
+            CandidateProfile(
+                user_id=owner.id,
+                education="本科",
+                target_roles=["后端工程师"],
+                target_cities=["上海"],
+                industries=[],
+                skills=[],
+            )
+        )
+        session.add(
+            ResumeVersion(
+                user_id=owner.id,
+                filename="confirmed-resume.txt",
+                source_type="paste",
+                content_type="text/plain",
+                extracted_text="项目中使用 Python 开发服务并编写接口测试。",
+                confirmed_at=utc_now(),
+            )
+        )
+        other_job = JobPosting(
+            user_id=other.id,
+            title="数据工程师",
+            required_skills=[],
+            source_type="manual",
+            source_captured_at=utc_now(),
+        )
+        session.add(other_job)
+        session.commit()
+        other_job_id = other_job.id
+
+    app = create_app(
+        Settings(
+            _env_file=None,
+            environment="test",
+            database_url="sqlite://",
+            secret_key="job-match-workflow-test-secret-long-enough",
+            allowed_origins=["http://localhost:3000"],
+        ),
+        workflow_context["factory"],
+    )
+    path = f"/api/v1/jobs/{workflow_context['job_id']}/match"
+    request = Request(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": b"",
+            "headers": [(b"origin", b"http://localhost:3000")],
+            "client": ("testclient", 123),
+            "server": ("testserver", 80),
+            "app": app,
+        }
+    )
+
+    with workflow_context["factory"]() as session:
+        owner = session.get(User, workflow_context["owner_id"])
+        assert owner is not None
+        response = await create_job_match_run(
+            workflow_context["job_id"], request, owner, session, app.state.settings
+        )
+        assert next(item for item in response.criteria if item.key == "education").status == "meets"
+        assert response.skills[0].status == "evidenced"
+        assert response.skills[1].status == "not_found"
+
+    with workflow_context["factory"]() as session:
+        owner = session.get(User, workflow_context["owner_id"])
+        other = session.get(User, workflow_context["other_id"])
+        assert owner is not None and other is not None
+        workspace = read_agent_workspace(owner, session)
+        with pytest.raises(HTTPException) as not_owned:
+            await create_job_match_run(
+                workflow_context["job_id"], request, other, session, app.state.settings
+            )
+        assert not_owned.value.status_code == 404
+
+        with pytest.raises(HTTPException) as no_resume:
+            await create_job_match_run(
+                other_job_id, request, other, session, app.state.settings
+            )
+        assert no_resume.value.status_code == 409
+
+    assert any(run.task_type == "job_match" for run in workspace.recent_runs)
+    with workflow_context["factory"]() as session:
+        runs = session.scalars(select(AgentRun).where(AgentRun.task_type == "job_match")).all()
+        assert len(runs) == 2
+        successful = next(run for run in runs if run.user_id == workflow_context["owner_id"])
+        failed = next(run for run in runs if run.user_id == workflow_context["other_id"])
+        assert successful.status == "succeeded"
+        assert successful.attempt_count == 1
+        assert successful.result["skills"][0]["status"] == "evidenced"
+        assert [event["step"] for event in successful.events] == [
+            "queued",
+            "workflow_routed",
+            "compare",
+            "completed",
+        ]
+        assert failed.status == "failed"
+        assert failed.error_code == "confirmed_resume_required"

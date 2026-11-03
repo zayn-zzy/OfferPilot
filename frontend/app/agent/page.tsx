@@ -246,12 +246,13 @@ export default function AgentTaskPlannerPage() {
           <button className="button button-secondary" disabled={workspaceLoading} onClick={() => void loadWorkspace()} type="button">刷新</button>
         </div>
         {workspaceLoading ? <p className="empty-state">正在载入运行记录…</p> : !workspace?.recent_runs.some((run) => run.task_type !== "task_plan") ? (
-          <p className="empty-state">岗位提取、公司研究、个人资料问答和 Skills 等工作流的最近运行记录会显示在这里；提醒计划详见上方记录。</p>
+          <p className="empty-state">岗位提取、岗位匹配、公司研究、个人资料问答和 Skills 等工作流的最近运行记录会显示在这里；提醒计划详见上方记录。</p>
         ) : (
           <ul className="agent-workspace-runs">
             {workspace.recent_runs.filter((run) => run.task_type !== "task_plan").map((run) => {
               const taskLabels: Record<string, string> = {
                 job_extraction: "岗位信息提取",
+                job_match: "岗位匹配分析",
                 company_research: "公司研究",
                 knowledge_qa: "个人资料问答",
                 skill_workflow: run.skill_id ? `Skill · ${run.skill_id}` : "求职 Skill",

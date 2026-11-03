@@ -535,3 +535,22 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 - `backend/.venv/bin/pytest -o addopts='' -q tests/test_agent_workflow.py`：7 项通过，覆盖统一派发、所有者引用、无索引无证据，以及 Provider 失败后的 AgentRun 记录。
 - RAG 定向测试 3 项通过，覆盖 Embeddings 维度校验、文本切块和 PostgreSQL 向量查询编译；`tests/test_task_planner.py tests/test_skills.py`：16 项通过。
 - `backend/.venv/bin/python -m compileall -q app tests`、前端 `bun run typecheck`、`git diff --check` 通过。使用 Fake Provider/SQLite 测试库，没有调用真实 LLM、向量服务或外部网络；未做浏览器端到端测试。
+
+## PRD F-08、§5.1：岗位匹配接入统一 Agent 工作流
+
+### 完成内容
+
+- 将 `job_match` 加入统一 LangGraph 路由。岗位卡片的“匹配分析”现在通过 `POST /api/v1/jobs/{id}/match` 创建并运行 `AgentRun`；原有 `GET` 只读接口保留，便于兼容既有客户端。
+- 匹配仍使用原有确定性逻辑比较硬性学历条件、城市/岗位/行业偏好和简历技能证据，不调用 LLM、不生成录用概率，也不修改岗位或投递状态。
+- 成功运行保存结构化结果、岗位关联、阶段事件和尝试次数；岗位不属于当前用户时不创建任务；没有已确认简历时将失败原因写入运行记录。Agent 工作区显示岗位匹配运行记录。
+- 复用 `AgentRun`，没有新增表或迁移。更新 README 的工作流说明和 API 契约。
+
+### 技术与上一模块的区别
+
+上一模块将资料问答的检索与引用校验接入统一路由；本次接入的是纯规则、只读的岗位匹配。它不需要模型 Provider 或外部工具，重点是复用统一任务状态和所有权校验，同时不改变原有匹配结果契约。
+
+### 验证
+
+- `backend/.venv/bin/pytest -o addopts='' -q tests/test_agent_workflow.py`：8 项通过；新增用例覆盖成功结果、阶段记录、工作区展示、跨用户岗位访问拒绝和未确认简历的失败记录。
+- RAG/匹配相关的文本切块与 PostgreSQL 向量查询编译定向测试：2 项通过。
+- `backend/.venv/bin/python -m compileall -q app tests`、前端 `bun run typecheck` 和 `git diff --check` 通过。使用 SQLite 测试库，未运行真实 PostgreSQL/Redis Compose 或浏览器端到端验证。
