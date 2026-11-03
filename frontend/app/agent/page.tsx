@@ -7,6 +7,7 @@ import { ApiError, apiRequest, type AgentTaskPlan, type AgentWorkspace } from "@
 const STATUS_LABELS: Record<AgentTaskPlan["status"], string> = {
   queued: "排队中",
   running: "整理计划中",
+  cancelling: "取消中",
   awaiting_confirmation: "等待确认",
   needs_clarification: "需要补充信息",
   confirmed: "提醒已创建",
@@ -83,7 +84,7 @@ export default function AgentTaskPlannerPage() {
   }, [loadWorkspace]);
 
   useEffect(() => {
-    if (!plans.some((plan) => plan.status === "queued" || plan.status === "running")) return;
+    if (!plans.some((plan) => ["queued", "running", "cancelling"].includes(plan.status))) return;
     const timer = window.setInterval(() => {
       void loadPlans();
     }, 1500);
@@ -123,7 +124,13 @@ export default function AgentTaskPlannerPage() {
         method: "POST",
       });
       setPlans((current) => [updated, ...current.filter((item) => item.id !== updated.id)]);
-      setNotice(action === "confirm" ? "提醒已保存，可在提醒中心查看。" : action === "cancel" ? "任务计划已取消。" : "已安排重试。" );
+      setNotice(action === "confirm"
+        ? "提醒已保存，可在提醒中心查看。"
+        : action === "cancel"
+          ? updated.status === "cancelling"
+            ? "已请求取消；模型响应完成后会丢弃结果。"
+            : "任务计划已取消。"
+          : "已安排重试。");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "任务操作失败。");
       if (cause instanceof ApiError && cause.status === 401) setRequiresLogin(true);
@@ -216,7 +223,7 @@ export default function AgentTaskPlannerPage() {
                 <article className="agent-plan-card" key={plan.id}>
                   <div className="agent-plan-heading">
                     <div><p className="eyebrow">{new Date(plan.created_at).toLocaleString("zh-CN")}</p><h3>{preview?.title || "求职任务计划"}</h3></div>
-                    <span className={`skill-run-status ${plan.status === "failed" ? "skill-run-failed" : plan.status === "awaiting_confirmation" || plan.status === "queued" || plan.status === "running" ? "skill-run-running" : plan.status === "confirmed" ? "skill-run-succeeded" : ""}`}>
+                    <span className={`skill-run-status ${plan.status === "failed" ? "skill-run-failed" : plan.status === "awaiting_confirmation" || plan.status === "queued" || plan.status === "running" || plan.status === "cancelling" ? "skill-run-running" : plan.status === "confirmed" ? "skill-run-succeeded" : ""}`}>
                       {STATUS_LABELS[plan.status]}
                     </span>
                   </div>
@@ -225,6 +232,7 @@ export default function AgentTaskPlannerPage() {
                   {preview?.details && <p><strong>补充说明：</strong>{preview.details}</p>}
                   {preview?.kind && preview.title && <p><strong>提醒类型：</strong>{KIND_LABELS[preview.kind] || preview.kind}</p>}
                   {plan.status === "needs_clarification" && <div className="agent-plan-notice">{preview?.clarification_question || "请补充具体日期和任务动作后重新创建。"}</div>}
+                  {plan.status === "cancelling" && <p className="agent-plan-notice" role="status">正在等待当前模型请求结束；返回内容不会保存，也不会创建提醒。</p>}
                   {plan.status === "failed" && <div className="agent-task-error"><p>{plan.error_message || "任务规划失败。"}</p>
                     <button className="button button-secondary" type="button" disabled={busy || plan.attempt_count >= 3} onClick={() => void runAction(plan, "retry")}>重试</button>
                   </div>}
@@ -232,6 +240,9 @@ export default function AgentTaskPlannerPage() {
                   {plan.status === "awaiting_confirmation" && <div className="agent-plan-actions">
                     <button className="button button-primary" type="button" disabled={busy} onClick={() => void runAction(plan, "confirm")}>{busy ? "处理中…" : "确认并创建提醒"}</button>
                     <button className="button button-secondary" type="button" disabled={busy} onClick={() => void runAction(plan, "cancel")}>取消计划</button>
+                  </div>}
+                  {(plan.status === "queued" || plan.status === "running") && <div className="agent-plan-actions">
+                    <button className="button button-secondary" type="button" disabled={busy} onClick={() => void runAction(plan, "cancel")}>{busy ? "处理中…" : "取消任务"}</button>
                   </div>}
                   {plan.status === "needs_clarification" && <div className="agent-plan-actions"><button className="button button-secondary" type="button" disabled={busy} onClick={() => void runAction(plan, "cancel")}>关闭</button></div>}
                 </article>

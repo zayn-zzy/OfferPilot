@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import Response, StreamingResponse
 from langgraph.graph import END, START, StateGraph
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -59,6 +59,11 @@ from app.schemas import (
     JobSourceEvidenceRead,
 )
 from app.services.job_extraction import JobExtractionError, JobExtractionProvider
+from app.services.agent_lifecycle import (
+    MAX_ACTIVE_AGENT_RUNS_PER_USER,
+    MAX_AGENT_ATTEMPTS,
+    count_active_agent_runs,
+)
 from app.services.task_planner import (
     TaskPlanCandidate,
     TaskPlannerError,
@@ -68,9 +73,6 @@ from app.services.task_planner import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/agent", tags=["agent"])
-MAX_ATTEMPTS = 3
-MAX_ACTIVE_TASKS_PER_USER = 3
-MAX_TASK_PLAN_ATTEMPTS = 3
 TERMINAL_STATUSES = {"succeeded", "failed", "confirmed", "cancelled"}
 AGENT_WORKSPACE_CAPABILITIES = (
     AgentCapabilityRead(
@@ -326,6 +328,22 @@ def _append_task_plan_event(run: AgentRun, event: str, message: str, **details: 
     run.updated_at = utc_now()
 
 
+def _finish_task_plan_cancellation(run: AgentRun) -> None:
+    """Finalize a cooperative cancellation and ensure no plan preview is saved."""
+
+    run.status = "cancelled"
+    run.result = None
+    run.error_code = None
+    run.error_message = None
+    run.finished_at = utc_now()
+    _append_task_plan_event(
+        run,
+        "cancelled",
+        "取消已完成；模型返回内容未保存，也未创建提醒。",
+        step="cancelled",
+    )
+
+
 def _task_plan_job_match(
     session: Session, user: User, candidate: TaskPlanCandidate
 ) -> tuple[UUID | None, str | None]:
@@ -394,7 +412,11 @@ async def run_task_plan(
 
     async def load_context(state: TaskPlanWorkflowState) -> dict[str, object]:
         with session_factory() as session:
-            run = session.get(AgentRun, state["task_id"])
+            run = session.scalar(
+                select(AgentRun)
+                .where(AgentRun.id == state["task_id"])
+                .with_for_update()
+            )
             if run is None or run.task_type != "task_plan" or run.status != "queued":
                 return {"final_status": "skipped"}
             run.status = "running"
@@ -506,8 +528,18 @@ async def run_task_plan(
         if final_status == "skipped":
             return {}
         with session_factory() as session:
-            run = session.get(AgentRun, state["task_id"])
-            if run is None or run.status != "running":
+            run = session.scalar(
+                select(AgentRun)
+                .where(AgentRun.id == state["task_id"])
+                .with_for_update()
+            )
+            if run is None:
+                return {}
+            if run.status == "cancelling":
+                _finish_task_plan_cancellation(run)
+                session.commit()
+                return {}
+            if run.status != "running":
                 return {}
             run.finished_at = utc_now()
             if final_status == "failed":
@@ -544,13 +576,24 @@ async def run_task_plan(
 
 
 def _owned_task_plan(session: Session, user: User, task_id: UUID) -> AgentRun:
-    run = session.scalar(
-        select(AgentRun).where(
-            AgentRun.id == task_id,
-            AgentRun.user_id == user.id,
-            AgentRun.task_type == "task_plan",
-        )
+    return _select_owned_task_plan(session, user, task_id, for_update=False)
+
+
+def _select_owned_task_plan(
+    session: Session,
+    user: User,
+    task_id: UUID,
+    *,
+    for_update: bool,
+) -> AgentRun:
+    statement = select(AgentRun).where(
+        AgentRun.id == task_id,
+        AgentRun.user_id == user.id,
+        AgentRun.task_type == "task_plan",
     )
+    if for_update:
+        statement = statement.with_for_update()
+    run = session.scalar(statement)
     if run is None:
         raise HTTPException(status_code=404, detail="Agent 任务计划不存在。")
     return run
@@ -586,16 +629,10 @@ def create_task_plan(
             )
         return _task_plan_read(existing)
 
-    active_count = session.scalar(
-        select(func.count(AgentRun.id)).where(
-            AgentRun.user_id == user.id,
-            AgentRun.task_type == "task_plan",
-            AgentRun.status.in_(("queued", "running")),
-        )
-    )
-    if active_count and active_count >= MAX_ACTIVE_TASKS_PER_USER:
+    if count_active_agent_runs(session, user.id) >= MAX_ACTIVE_AGENT_RUNS_PER_USER:
         raise HTTPException(
-            status_code=429, detail="已有 3 个任务计划正在处理，请稍后再试。"
+            status_code=429,
+            detail="当前已有 3 个 Agent 任务正在处理，请等待完成或取消后再提交。",
         )
 
     run = AgentRun(
@@ -675,12 +712,17 @@ def retry_task_plan(
     settings: Annotated[Settings, Depends(settings_dependency)],
 ) -> AgentTaskPlanRead:
     enforce_same_origin(request, settings)
-    run = _owned_task_plan(session, user, task_id)
+    run = _select_owned_task_plan(session, user, task_id, for_update=True)
     if run.status != "failed":
         raise HTTPException(status_code=409, detail="只有失败任务可以重试。")
-    if run.attempt_count >= MAX_TASK_PLAN_ATTEMPTS:
+    if run.attempt_count >= MAX_AGENT_ATTEMPTS:
         raise HTTPException(
-            status_code=409, detail="任务已达到最大重试次数，请重新创建。"
+            status_code=409, detail="任务已达到最多 3 次尝试次数，请重新创建。"
+        )
+    if count_active_agent_runs(session, user.id) >= MAX_ACTIVE_AGENT_RUNS_PER_USER:
+        raise HTTPException(
+            status_code=429,
+            detail="当前已有 3 个 Agent 任务正在处理，请等待完成或取消后再重试。",
         )
     run.status = "queued"
     run.error_code = None
@@ -708,7 +750,7 @@ def confirm_task_plan(
     """Write the proposed reminder only after the owner explicitly confirms it."""
 
     enforce_same_origin(request, settings)
-    run = _owned_task_plan(session, user, task_id)
+    run = _select_owned_task_plan(session, user, task_id, for_update=True)
     if run.status == "confirmed":
         return _task_plan_read(run)
     if run.status != "awaiting_confirmation" or not run.result or not run.result.get("preview"):
@@ -813,17 +855,33 @@ def cancel_task_plan(
     settings: Annotated[Settings, Depends(settings_dependency)],
 ) -> AgentTaskPlanRead:
     enforce_same_origin(request, settings)
-    run = _owned_task_plan(session, user, task_id)
-    if run.status not in {"awaiting_confirmation", "needs_clarification", "failed", "cancelled"}:
-        raise HTTPException(status_code=409, detail="当前任务计划无法取消。")
-    if run.status != "cancelled":
+    run = _select_owned_task_plan(session, user, task_id, for_update=True)
+    if run.status in {"cancelling", "cancelled"}:
+        return _task_plan_read(run)
+    if run.status == "queued":
         run.status = "cancelled"
         run.finished_at = utc_now()
         _append_task_plan_event(
-            run, "cancelled", "任务计划已取消，未创建提醒。", step="cancelled"
+            run, "cancelled", "排队任务已取消，模型服务未调用。", step="cancelled"
         )
-        session.commit()
-        session.refresh(run)
+    elif run.status == "running":
+        run.status = "cancelling"
+        _append_task_plan_event(
+            run,
+            "progress",
+            "已请求取消；正在等待当前模型请求结束，返回内容不会保存。",
+            step="cancel_requested",
+        )
+    elif run.status in {"awaiting_confirmation", "needs_clarification", "failed"}:
+        run.status = "cancelled"
+        run.finished_at = utc_now()
+        _append_task_plan_event(
+            run, "cancelled", "任务计划已关闭，未创建提醒。", step="cancelled"
+        )
+    else:
+        raise HTTPException(status_code=409, detail="当前任务计划无法取消。")
+    session.commit()
+    session.refresh(run)
     return _task_plan_read(run)
 
 
@@ -988,16 +1046,35 @@ def create_job_extraction(
     """Queue extraction from text explicitly provided by the signed-in user."""
 
     enforce_same_origin(request, settings)
-    active_count = session.scalar(
-        select(func.count(AgentRun.id)).where(
-            AgentRun.user_id == user.id,
-            AgentRun.status.in_(("queued", "running", "cancelling")),
+    request_hash = hashlib.sha256(
+        json.dumps(
+            {"source_url": payload.source_url, "text": payload.text},
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    if payload.idempotency_key:
+        existing = session.scalar(
+            select(AgentRun).where(
+                AgentRun.user_id == user.id,
+                AgentRun.idempotency_key == payload.idempotency_key,
+            )
         )
-    )
-    if active_count and active_count >= MAX_ACTIVE_TASKS_PER_USER:
+        if existing is not None:
+            if (
+                existing.task_type != "job_extraction"
+                or existing.request_hash != request_hash
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="该请求标识已用于其他内容，请重新提交。",
+                )
+            return _task_read(existing)
+
+    if count_active_agent_runs(session, user.id) >= MAX_ACTIVE_AGENT_RUNS_PER_USER:
         raise HTTPException(
             status_code=429,
-            detail="当前已有 3 个岗位解析任务在运行，请等待完成后再提交。",
+            detail="当前已有 3 个 Agent 任务正在处理，请等待完成或取消后再提交。",
         )
 
     run = AgentRun(
@@ -1006,11 +1083,32 @@ def create_job_extraction(
         status="queued",
         input_text=payload.text,
         source_url=payload.source_url,
+        idempotency_key=payload.idempotency_key,
+        request_hash=request_hash,
         events=[],
     )
     _append_event(run, "progress", "任务已排队。", step="queued")
     session.add(run)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        if payload.idempotency_key:
+            existing = session.scalar(
+                select(AgentRun).where(
+                    AgentRun.user_id == user.id,
+                    AgentRun.idempotency_key == payload.idempotency_key,
+                )
+            )
+            if (
+                existing is not None
+                and existing.task_type == "job_extraction"
+                and existing.request_hash == request_hash
+            ):
+                return _task_read(existing)
+        raise HTTPException(
+            status_code=409, detail="岗位解析任务创建冲突，请重新提交。"
+        ) from None
     session.refresh(run)
     background_tasks.add_task(
         request.app.state.agent_workflow_graph.ainvoke,
@@ -1056,7 +1154,7 @@ def read_agent_task_source(
 ) -> AgentTaskSourceRead:
     """Return the original text only to its owner while the task is reviewable."""
 
-    run = _owned_task(session, user, task_id)
+    run = _owned_task(session, user, task_id, for_update=True)
     if run.status == "confirmed" or not run.input_text:
         raise HTTPException(status_code=409, detail="原文已关联到已保存岗位的来源依据。")
     return AgentTaskSourceRead(
@@ -1133,11 +1231,16 @@ def retry_agent_task(
     """Retry a failed task up to the configured per-task attempt limit."""
 
     enforce_same_origin(request, settings)
-    run = _owned_task(session, user, task_id)
+    run = _owned_task(session, user, task_id, for_update=True)
     if run.status != "failed":
         raise HTTPException(status_code=409, detail="只有失败的任务可以重试。")
-    if run.attempt_count >= MAX_ATTEMPTS:
+    if run.attempt_count >= MAX_AGENT_ATTEMPTS:
         raise HTTPException(status_code=409, detail="任务已达到最多 3 次尝试次数。")
+    if count_active_agent_runs(session, user.id) >= MAX_ACTIVE_AGENT_RUNS_PER_USER:
+        raise HTTPException(
+            status_code=429,
+            detail="当前已有 3 个 Agent 任务正在处理，请等待完成或取消后再重试。",
+        )
     run.status = "queued"
     run.error_code = None
     run.error_message = None

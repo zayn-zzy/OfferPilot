@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from langgraph.types import Command
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -50,6 +50,11 @@ from app.services.skills import (
     source_text_for_model,
     validate_skill_draft,
 )
+from app.services.agent_lifecycle import (
+    MAX_ACTIVE_AGENT_RUNS_PER_USER,
+    MAX_AGENT_ATTEMPTS,
+    count_active_agent_runs,
+)
 from app.services.skill_graph import (
     SkillWorkflowState,
     build_skill_graph,
@@ -58,8 +63,6 @@ from app.services.skill_graph import (
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 logger = logging.getLogger(__name__)
-MAX_ACTIVE_SKILL_RUNS = 3
-MAX_SKILL_ATTEMPTS = 3
 APPROVAL_TTL = timedelta(minutes=30)
 SAVE_PREP_PACK_ACTION = "save_application_prep_pack"
 
@@ -82,6 +85,22 @@ def _append_event(run: AgentRun, event: str, message: str, **details: object) ->
     )
     run.events = events
     run.updated_at = utc_now()
+
+
+def _finish_skill_cancellation(run: AgentRun) -> None:
+    """Discard an in-flight draft and persist the completed cancellation."""
+
+    run.status = "cancelled"
+    run.result = None
+    run.error_code = None
+    run.error_message = None
+    run.finished_at = utc_now()
+    _append_event(
+        run,
+        "cancelled",
+        "取消已完成；模型返回内容未保存。",
+        step="cancelled",
+    )
 
 
 def _skill_run_read(run: AgentRun) -> SkillRunRead:
@@ -110,14 +129,21 @@ def _skill_run_read(run: AgentRun) -> SkillRunRead:
     )
 
 
-def _owned_skill_run(session: Session, user: User, run_id: UUID) -> AgentRun:
-    run = session.scalar(
-        select(AgentRun).where(
-            AgentRun.id == run_id,
-            AgentRun.user_id == user.id,
-            AgentRun.task_type == "skill_workflow",
-        )
+def _owned_skill_run(
+    session: Session,
+    user: User,
+    run_id: UUID,
+    *,
+    for_update: bool = False,
+) -> AgentRun:
+    statement = select(AgentRun).where(
+        AgentRun.id == run_id,
+        AgentRun.user_id == user.id,
+        AgentRun.task_type == "skill_workflow",
     )
+    if for_update:
+        statement = statement.with_for_update()
+    run = session.scalar(statement)
     if run is None:
         raise HTTPException(status_code=404, detail="求职 Skill 任务不存在。")
     return run
@@ -347,8 +373,16 @@ class _SkillGraphNodes:
 
         run_id = UUID(state["run_id"])
         with self.session_factory() as session:
-            run = session.get(AgentRun, run_id)
-            if run is None or run.status != "queued":
+            run = session.scalar(
+                select(AgentRun).where(AgentRun.id == run_id).with_for_update()
+            )
+            if run is None:
+                return {"outcome": "cancelled"}
+            if run.status == "cancelling":
+                _finish_skill_cancellation(run)
+                session.commit()
+                return {"outcome": "cancelled"}
+            if run.status != "queued":
                 return {"outcome": "cancelled"}
             run.status = "running"
             run.attempt_count += 1
@@ -375,8 +409,16 @@ class _SkillGraphNodes:
 
         run_id = UUID(state["run_id"])
         with self.session_factory() as session:
-            run = session.get(AgentRun, run_id)
-            if run is None or run.status != "running":
+            run = session.scalar(
+                select(AgentRun).where(AgentRun.id == run_id).with_for_update()
+            )
+            if run is None:
+                return {"outcome": "cancelled"}
+            if run.status == "cancelling":
+                _finish_skill_cancellation(run)
+                session.commit()
+                return {"outcome": "cancelled"}
+            if run.status != "running":
                 return {"outcome": "cancelled"}
             try:
                 job_data, profile_data, questions, sources, _ = _context_for_run(session, run)
@@ -405,8 +447,16 @@ class _SkillGraphNodes:
             failure_message = "求职草稿生成遇到意外错误，请检查配置后重试。"
         else:
             with self.session_factory() as session:
-                run = session.get(AgentRun, run_id)
-                if run is None or run.status != "running":
+                run = session.scalar(
+                    select(AgentRun).where(AgentRun.id == run_id).with_for_update()
+                )
+                if run is None:
+                    return {"outcome": "cancelled"}
+                if run.status == "cancelling":
+                    _finish_skill_cancellation(run)
+                    session.commit()
+                    return {"outcome": "cancelled"}
+                if run.status != "running":
                     return {"outcome": "cancelled"}
                 run.result = candidate.model_dump(mode="json")
                 run.model_name = model_name
@@ -420,8 +470,13 @@ class _SkillGraphNodes:
             return {"outcome": "generated"}
 
         with self.session_factory() as session:
-            run = session.get(AgentRun, run_id)
-            if run is not None and run.status == "running":
+            run = session.scalar(
+                select(AgentRun).where(AgentRun.id == run_id).with_for_update()
+            )
+            if run is not None and run.status == "cancelling":
+                _finish_skill_cancellation(run)
+                session.commit()
+            elif run is not None and run.status == "running":
                 self._mark_failed(
                     session,
                     run,
@@ -437,8 +492,16 @@ class _SkillGraphNodes:
 
         run_id = UUID(state["run_id"])
         with self.session_factory() as session:
-            run = session.get(AgentRun, run_id)
-            if run is None or run.status != "running" or not run.result:
+            run = session.scalar(
+                select(AgentRun).where(AgentRun.id == run_id).with_for_update()
+            )
+            if run is None:
+                return {"outcome": "cancelled"}
+            if run.status == "cancelling":
+                _finish_skill_cancellation(run)
+                session.commit()
+                return {"outcome": "cancelled"}
+            if run.status != "running" or not run.result:
                 return {"outcome": "cancelled"}
             try:
                 _, _, _, sources, source_truncated = _context_for_run(session, run)
@@ -655,8 +718,13 @@ async def run_skill_workflow(
     except Exception as exc:
         logger.error("Skill graph %s could not start (%s)", run_id, type(exc).__name__)
         with session_factory() as session:
-            run = session.get(AgentRun, run_id)
-            if run is not None and run.status in {"queued", "running"}:
+            run = session.scalar(
+                select(AgentRun).where(AgentRun.id == run_id).with_for_update()
+            )
+            if run is not None and run.status == "cancelling":
+                _finish_skill_cancellation(run)
+                session.commit()
+            elif run is not None and run.status in {"queued", "running"}:
                 _SkillGraphNodes(session_factory, settings, provider)._mark_failed(
                     session,
                     run,
@@ -792,14 +860,11 @@ def create_skill_run(
         response.status_code = status.HTTP_200_OK
         return _skill_run_read(existing)
 
-    active_count = session.scalar(
-        select(func.count(AgentRun.id)).where(
-            AgentRun.user_id == user.id,
-            AgentRun.status.in_(("queued", "running")),
+    if count_active_agent_runs(session, user.id) >= MAX_ACTIVE_AGENT_RUNS_PER_USER:
+        raise HTTPException(
+            status_code=429,
+            detail="当前已有 3 个 Agent 任务正在处理，请等待完成或取消后再提交。",
         )
-    ) or 0
-    if active_count >= MAX_ACTIVE_SKILL_RUNS:
-        raise HTTPException(status_code=429, detail="当前已有 3 个 Agent 任务运行，请稍后再试。")
 
     run = AgentRun(
         user_id=user.id,
@@ -875,11 +940,16 @@ def retry_skill_run(
     settings: Annotated[Settings, Depends(settings_dependency)],
 ) -> SkillRunRead:
     enforce_same_origin(request, settings)
-    run = _owned_skill_run(session, user, run_id)
+    run = _owned_skill_run(session, user, run_id, for_update=True)
     if run.status != "failed":
         raise HTTPException(status_code=409, detail="只有失败的求职任务可以重试。")
-    if run.attempt_count >= MAX_SKILL_ATTEMPTS:
+    if run.attempt_count >= MAX_AGENT_ATTEMPTS:
         raise HTTPException(status_code=409, detail="任务已达到最多 3 次尝试次数。")
+    if count_active_agent_runs(session, user.id) >= MAX_ACTIVE_AGENT_RUNS_PER_USER:
+        raise HTTPException(
+            status_code=429,
+            detail="当前已有 3 个 Agent 任务正在处理，请等待完成或取消后再重试。",
+        )
     run.status = "queued"
     run.error_code = None
     run.error_message = None
@@ -904,13 +974,28 @@ def cancel_skill_run(
     settings: Annotated[Settings, Depends(settings_dependency)],
 ) -> SkillRunRead:
     enforce_same_origin(request, settings)
-    run = _owned_skill_run(session, user, run_id)
-    if run.status not in {"queued", "running"}:
+    run = _owned_skill_run(session, user, run_id, for_update=True)
+    if run.status in {"cancelling", "cancelled"}:
+        return _skill_run_read(run)
+    if run.status == "queued":
+        run.status = "cancelled"
+        run.result = None
+        run.error_code = None
+        run.error_message = None
+        run.finished_at = utc_now()
+        _append_event(run, "cancelled", "排队任务已取消，工作流未启动。", step="cancelled")
+    elif run.status == "running":
+        run.status = "cancelling"
+        _append_event(
+            run,
+            "progress",
+            "已请求取消；正在等待当前模型请求结束，返回内容不会保存。",
+            step="cancel_requested",
+        )
+    else:
         raise HTTPException(status_code=409, detail="只有排队中或运行中的任务可以取消。")
-    run.status = "cancelled"
-    run.finished_at = utc_now()
-    _append_event(run, "cancelled", "用户已取消求职任务。", step="cancelled")
     session.commit()
+    session.refresh(run)
     return _skill_run_read(run)
 
 

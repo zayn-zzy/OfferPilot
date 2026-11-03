@@ -437,6 +437,7 @@ class AgentJobExtractionCreate(BaseModel):
 
     text: str = Field(min_length=20, max_length=30_000)
     source_url: str | None = Field(default=None, max_length=2048)
+    idempotency_key: str | None = Field(default=None, min_length=16, max_length=128)
 
     @field_validator("text")
     @classmethod
@@ -455,6 +456,14 @@ class AgentJobExtractionCreate(BaseModel):
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("来源链接必须以 http:// 或 https:// 开头")
         return value.strip()
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def normalize_idempotency_key(cls, value: str | None) -> str | None:
+        normalized = value.strip() if value else None
+        if normalized is not None and len(normalized) < 16:
+            raise ValueError("幂等键至少需要 16 个字符")
+        return normalized
 
 
 class AgentTaskRead(BaseModel):
@@ -568,6 +577,7 @@ class AgentTaskPlanRead(BaseModel):
     status: Literal[
         "queued",
         "running",
+        "cancelling",
         "awaiting_confirmation",
         "needs_clarification",
         "confirmed",
@@ -815,7 +825,9 @@ SkillId = Literal[
     "interview_prep",
     "application_prep_pack",
 ]
-SkillRunStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
+SkillRunStatus = Literal[
+    "queued", "running", "cancelling", "succeeded", "failed", "cancelled"
+]
 ApprovalStatus = Literal[
     "pending", "approved", "rejected", "expired", "executed", "invalidated"
 ]

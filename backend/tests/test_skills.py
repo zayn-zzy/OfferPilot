@@ -32,6 +32,7 @@ from app.models import (
 )
 from app.routes.skills import (
     approve_request,
+    cancel_skill_run,
     create_skill_run,
     execute_approved_action,
     request_prep_pack_approval,
@@ -77,6 +78,25 @@ class FakeSkillProvider:
                 warnings=[],
             ),
             "fake-chat-model",
+        )
+
+
+class BlockingSkillProvider(FakeSkillProvider):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def generate(self, skill, *, job, profile, questions, sources, settings):
+        self.started.set()
+        await self.release.wait()
+        return await super().generate(
+            skill,
+            job=job,
+            profile=profile,
+            questions=questions,
+            sources=sources,
+            settings=settings,
         )
 
 
@@ -338,6 +358,106 @@ def test_missing_confirmed_resume_fails_before_model_request(test_context: dict[
     assert run.status == "failed"
     assert run.error_code == "confirmed_resume_required"
     assert provider.calls == []
+
+
+@pytest.mark.anyio
+async def test_running_skill_cancellation_discards_model_result(
+    test_context: dict[str, object],
+) -> None:
+    context = test_context
+    factory = context["factory"]
+    session = context["session"]
+    owner = session.get(User, context["owner"])
+    assert isinstance(factory, sessionmaker) and isinstance(session, Session)
+    assert owner is not None
+    provider = BlockingSkillProvider()
+    run = AgentRun(
+        user_id=owner.id,
+        job_id=context["job"],
+        resume_version_id=context["resume"],
+        task_type="skill_workflow",
+        skill_id="application_prep_pack",
+        skill_version="1.0.0",
+        status="queued",
+        input_text=json.dumps({"questions": []}),
+        events=[],
+    )
+    session.add(run)
+    session.commit()
+    session.refresh(run)
+
+    worker = asyncio.create_task(
+        run_skill_workflow(
+            run.id,
+            factory,
+            context["settings"],
+            provider,
+            context["app"].state.skill_checkpoint_saver,
+        )
+    )
+    await asyncio.wait_for(provider.started.wait(), timeout=2)
+    with factory() as cancel_session:
+        current_owner = cancel_session.get(User, owner.id)
+        assert current_owner is not None
+        pending = cancel_skill_run(
+            run.id,
+            make_request(context["app"], f"/api/v1/skills/runs/{run.id}/cancel"),
+            current_owner,
+            cancel_session,
+            context["settings"],
+        )
+        assert pending.status == "cancelling"
+    provider.release.set()
+    await asyncio.wait_for(worker, timeout=5)
+
+    session.refresh(run)
+    assert run.status == "cancelled"
+    assert run.result is None
+    assert run.finished_at is not None
+    assert run.events[-1]["event"] == "cancelled"
+
+
+@pytest.mark.anyio
+async def test_queued_skill_cancellation_skips_provider(test_context: dict[str, object]) -> None:
+    context = test_context
+    factory = context["factory"]
+    session = context["session"]
+    owner = session.get(User, context["owner"])
+    provider = FakeSkillProvider()
+    assert isinstance(factory, sessionmaker) and isinstance(session, Session)
+    assert owner is not None
+    run = AgentRun(
+        user_id=owner.id,
+        job_id=context["job"],
+        task_type="skill_workflow",
+        skill_id="job_analysis",
+        skill_version="1.0.0",
+        status="queued",
+        input_text=json.dumps({"questions": []}),
+        events=[],
+    )
+    session.add(run)
+    session.commit()
+    session.refresh(run)
+
+    cancelled = cancel_skill_run(
+        run.id,
+        make_request(context["app"], f"/api/v1/skills/runs/{run.id}/cancel"),
+        owner,
+        session,
+        context["settings"],
+    )
+    assert cancelled.status == "cancelled"
+    await run_skill_workflow(
+        run.id,
+        factory,
+        context["settings"],
+        provider,
+        context["app"].state.skill_checkpoint_saver,
+    )
+    assert provider.calls == []
+    session.refresh(run)
+    assert run.status == "cancelled"
 
 
 def test_provider_failure_is_persisted_for_visible_retry(test_context: dict[str, object]) -> None:

@@ -17,6 +17,7 @@ import {
 const STATUS_LABELS: Record<SkillRun["status"], string> = {
   queued: "排队中",
   running: "运行中",
+  cancelling: "取消中",
   succeeded: "待检查",
   failed: "失败",
   cancelled: "已取消",
@@ -102,7 +103,7 @@ export default function SkillsPage() {
   }, [loadWorkspace]);
 
   useEffect(() => {
-    const hasActiveRun = runs.some((run) => run.status === "queued" || run.status === "running");
+    const hasActiveRun = runs.some((run) => ["queued", "running", "cancelling"].includes(run.status));
     if (!hasActiveRun) return;
     const timer = window.setInterval(() => {
       void apiRequest<SkillRun[]>("/api/v1/skills/runs?limit=20")
@@ -164,7 +165,11 @@ export default function SkillsPage() {
       });
       setActiveRunId(updated.id);
       setRuns((current) => [updated, ...current.filter((item) => item.id !== updated.id)]);
-      setNotice(action === "retry" ? "已安排任务重试。" : "任务已取消。正在运行的模型请求完成后将被丢弃。");
+      setNotice(action === "retry"
+        ? "已安排任务重试。"
+        : updated.status === "cancelling"
+          ? "已请求取消；模型响应完成后会丢弃结果。"
+          : "任务已取消。模型结果不会保存。");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "任务操作失败。");
     } finally {
@@ -331,6 +336,7 @@ export default function SkillsPage() {
           </div>
           {activeRun.events.length > 0 && <ol className="agent-task-events">{activeRun.events.map((event) => <li key={`${activeRun.id}-${event.id}`}><span>{event.message}</span><time>{new Date(event.created_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</time></li>)}</ol>}
           {activeRun.error_message && <div className="agent-task-error"><p>{activeRun.error_message}</p>{activeRun.status === "failed" && activeRun.attempt_count < 3 && <button className="button button-secondary" disabled={working} onClick={() => void runAction(activeRun, "retry")} type="button">重试任务</button>}</div>}
+          {activeRun.status === "cancelling" && <p className="agent-plan-notice" role="status">正在等待当前模型请求结束；返回内容不会保存。</p>}
           {(activeRun.status === "queued" || activeRun.status === "running") && <button className="button button-secondary" disabled={working} onClick={() => void runAction(activeRun, "cancel")} type="button">取消任务</button>}
 
           {activeRun.result && <div className="skill-draft-result">

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   apiRequest,
   duplicateJobIdFromError,
@@ -89,6 +89,7 @@ type JobExtractionPanelProps = {
 };
 
 export default function JobExtractionPanel({ onJobCreated, onCancel }: JobExtractionPanelProps) {
+  const idempotencyKey = useRef<string | null>(null);
   const [text, setText] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
   const [task, setTask] = useState<AgentTask | null>(null);
@@ -179,11 +180,17 @@ export default function JobExtractionPanel({ onJobCreated, onCancel }: JobExtrac
     event.preventDefault();
     setSubmitting(true);
     setError("");
+    idempotencyKey.current ??= window.crypto.randomUUID();
     try {
       const created = await apiRequest<AgentTask>("/api/v1/agent/job-extractions", {
         method: "POST",
-        body: JSON.stringify({ text, source_url: sourceUrl.trim() || null }),
+        body: JSON.stringify({
+          text,
+          source_url: sourceUrl.trim() || null,
+          idempotency_key: idempotencyKey.current,
+        }),
       });
+      idempotencyKey.current = null;
       setTask(created);
       setEvents(created.events);
       if (created.status === "succeeded") setDraft(draftFromTask(created));
@@ -304,6 +311,7 @@ export default function JobExtractionPanel({ onJobCreated, onCancel }: JobExtrac
   }
 
   function startAnother() {
+    idempotencyKey.current = null;
     setTask(null);
     setDuplicateTarget(null);
     setEvents([]);
@@ -318,8 +326,8 @@ export default function JobExtractionPanel({ onJobCreated, onCancel }: JobExtrac
       {!task && <>
         <p className="job-form-hint">原文会发送到你配置的模型服务商处理，请先确认该服务商符合你的隐私要求。模型只提取原文明确支持的字段，不会访问招聘网站或自动投递。</p>
         <form className="job-extraction-form" onSubmit={start}>
-          <label>来源链接（选填）<input type="url" maxLength={2048} value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://…" /></label>
-          <label>招聘原文<textarea required minLength={20} maxLength={30000} rows={9} value={text} onChange={(event) => setText(event.target.value)} placeholder="粘贴岗位职责、任职要求和招聘信息，至少 20 个字符" /></label>
+          <label>来源链接（选填）<input type="url" maxLength={2048} value={sourceUrl} onChange={(event) => { idempotencyKey.current = null; setSourceUrl(event.target.value); }} placeholder="https://…" /></label>
+          <label>招聘原文<textarea required minLength={20} maxLength={30000} rows={9} value={text} onChange={(event) => { idempotencyKey.current = null; setText(event.target.value); }} placeholder="粘贴岗位职责、任职要求和招聘信息，至少 20 个字符" /></label>
           <div className="job-extraction-actions">
             <button className="button button-primary" disabled={submitting || historyLoading} type="submit">{historyLoading ? "读取任务中…" : submitting ? "正在创建任务…" : "提取岗位信息"}</button>
             <button className="button button-secondary" onClick={onCancel} type="button">取消</button>

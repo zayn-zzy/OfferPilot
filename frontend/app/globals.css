@@ -233,7 +233,7 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .skill-run-status { flex: 0 0 auto; padding: 5px 8px; border-radius: 7px; color: #61756d; background: #f0f5f1; font-size: 10px; font-style: normal; font-weight: 700; }
 .skill-run-succeeded { color: #28675b; background: #e8f4ed; }
 .skill-run-failed { color: #a34949; background: #fbebeb; }
-.skill-run-running, .skill-run-queued { color: #815a20; background: #fbf3e5; }
+.skill-run-running, .skill-run-queued, .skill-run-cancelling { color: #815a20; background: #fbf3e5; }
 .skill-run-cancelled { color: #697b73; background: #eef2ef; }
 .skill-result { margin-top: 21px; padding: 18px; border: 1px solid #e2ebe4; border-radius: 12px; background: #fcfdfc; }
 .skill-result-heading, .skill-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 13px; }

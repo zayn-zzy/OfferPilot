@@ -414,6 +414,7 @@ export type AgentTaskPlan = {
   status:
     | "queued"
     | "running"
+    | "cancelling"
     | "awaiting_confirmation"
     | "needs_clarification"
     | "confirmed"
@@ -525,7 +526,7 @@ export type SkillRun = {
   skill_id: SkillId;
   skill_version: string;
   job_id: string;
-  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  status: "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled";
   result: SkillDraft | null;
   events: { id: number; event: string; message: string; created_at: string; step?: string }[];
   error_code: string | null;

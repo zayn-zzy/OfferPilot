@@ -8,7 +8,7 @@ from uuid import UUID
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -18,7 +18,8 @@ from starlette.requests import Request
 from app.core.config import Settings
 from app.main import create_app
 from app.models import AgentRun, Base, JobSourceEvidence, User
-from app.routes.agent import cancel_agent_task, run_job_extraction
+from app.routes.agent import cancel_agent_task, create_job_extraction, run_job_extraction
+from app.schemas import AgentJobExtractionCreate
 from app.services.job_extraction import (
     ExtractedDateField,
     ExtractedSkillsField,
@@ -82,17 +83,112 @@ class BlockingProvider:
 
 
 def cancellation_request(test_app: FastAPI, task_id: UUID) -> Request:
+    return agent_request(test_app, f"/api/v1/agent/tasks/{task_id}/cancel")
+
+
+def agent_request(test_app: FastAPI, path: str) -> Request:
     return Request(
         {
             "type": "http",
             "method": "POST",
-            "path": f"/api/v1/agent/tasks/{task_id}/cancel",
+            "path": path,
             "headers": [(b"origin", b"http://localhost:3000")],
             "query_string": b"",
             "scheme": "http",
             "app": test_app,
         }
     )
+
+
+def test_job_extraction_creation_is_idempotent(test_app: FastAPI) -> None:
+    with test_app.state.session_factory() as session:
+        owner = User(
+            email="agent-idempotent@example.com",
+            password_hash="unused",
+            timezone="Asia/Shanghai",
+        )
+        session.add(owner)
+        session.commit()
+        session.refresh(owner)
+        key = "job-extraction-request-0001"
+        request = agent_request(test_app, "/api/v1/agent/job-extractions")
+        payload = AgentJobExtractionCreate(text=SOURCE_TEXT, idempotency_key=key)
+        first = create_job_extraction(
+            payload,
+            BackgroundTasks(),
+            request,
+            owner,
+            session,
+            test_app.state.settings,
+        )
+        repeated = create_job_extraction(
+            payload,
+            BackgroundTasks(),
+            request,
+            owner,
+            session,
+            test_app.state.settings,
+        )
+        assert repeated.id == first.id
+        assert session.query(AgentRun).count() == 1
+
+        session.add_all(
+            [
+                AgentRun(
+                    user_id=owner.id,
+                    task_type="task_plan",
+                    status="running",
+                    input_text="running plan",
+                    events=[],
+                ),
+                AgentRun(
+                    user_id=owner.id,
+                    task_type="skill_workflow",
+                    status="cancelling",
+                    input_text="cancelling skill",
+                    events=[],
+                ),
+            ]
+        )
+        session.commit()
+
+        # An idempotent replay returns the existing run even at the active-run cap.
+        capped_replay = create_job_extraction(
+            payload,
+            BackgroundTasks(),
+            request,
+            owner,
+            session,
+            test_app.state.settings,
+        )
+        assert capped_replay.id == first.id
+        with pytest.raises(HTTPException) as at_capacity:
+            create_job_extraction(
+                AgentJobExtractionCreate(
+                    text=SOURCE_TEXT,
+                    idempotency_key="job-extraction-request-0002",
+                ),
+                BackgroundTasks(),
+                request,
+                owner,
+                session,
+                test_app.state.settings,
+            )
+        assert at_capacity.value.status_code == 429
+
+        with pytest.raises(HTTPException) as reused_key:
+            create_job_extraction(
+                AgentJobExtractionCreate(
+                    text=SOURCE_TEXT + " 更新版本",
+                    idempotency_key=key,
+                ),
+                BackgroundTasks(),
+                request,
+                owner,
+                session,
+                test_app.state.settings,
+            )
+        assert reused_key.value.status_code == 409
 
 
 @pytest.fixture

@@ -1,5 +1,6 @@
 """Task-plan parsing, durable preview, explicit confirmation, and retry tests."""
 
+import asyncio
 import json
 from collections.abc import Generator
 from datetime import datetime, timezone
@@ -16,7 +17,7 @@ from starlette.requests import Request
 
 from app.core.config import Settings
 from app.models import AgentRun, Base, Reminder, User
-from app.routes.agent import confirm_task_plan, run_task_plan
+from app.routes.agent import cancel_task_plan, confirm_task_plan, run_task_plan
 from app.services.task_planner import (
     OpenAICompatibleTaskPlanner,
     TaskPlanCandidate,
@@ -48,6 +49,29 @@ class StaticPlanner:
             company_name="星河科技",
             job_title="后端开发工程师",
         ), "test-model"
+
+
+class BlockingPlanner(StaticPlanner):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def plan(self, text, timezone_name, now, settings):
+        self.calls += 1
+        self.started.set()
+        await self.release.wait()
+        return (
+            TaskPlanCandidate(
+                title="跟进测评",
+                details="检查测评邮件",
+                kind="assessment",
+                event_at="2030-11-11T09:00:00",
+                company_name="星河科技",
+                job_title="后端开发工程师",
+            ),
+            "test-model",
+        )
 
 
 @pytest.fixture
@@ -180,6 +204,67 @@ async def test_clarification_and_retry_states_do_not_write_reminders(
         assert run is not None and run.status == "awaiting_confirmation"
         assert run.attempt_count == 2
         assert session.query(Reminder).count() == 0
+
+
+@pytest.mark.anyio
+async def test_running_task_plan_cancellation_discards_model_result(
+    task_plan_database: tuple[sessionmaker[Session], Settings],
+) -> None:
+    factory, settings = task_plan_database
+    user_id, task_id = create_task(factory)
+    planner = BlockingPlanner()
+    worker = asyncio.create_task(run_task_plan(task_id, factory, settings, planner))
+    await asyncio.wait_for(planner.started.wait(), timeout=2)
+
+    with factory() as session:
+        user = session.get(User, user_id)
+        assert user is not None
+        cancellation = cancel_task_plan(
+            task_id,
+            request_without_origin(f"/api/v1/agent/task-plans/{task_id}/cancel"),
+            user,
+            session,
+            settings,
+        )
+        assert cancellation.status == "cancelling"
+        assert cancellation.events[-1]["step"] == "cancel_requested"
+
+    planner.release.set()
+    await asyncio.wait_for(worker, timeout=2)
+    with factory() as session:
+        run = session.get(AgentRun, task_id)
+        assert run is not None
+        assert run.status == "cancelled"
+        assert run.result is None
+        assert run.finished_at is not None
+        assert run.events[-1]["event"] == "cancelled"
+        assert session.query(Reminder).count() == 0
+
+
+@pytest.mark.anyio
+async def test_queued_task_plan_cancellation_skips_provider(
+    task_plan_database: tuple[sessionmaker[Session], Settings],
+) -> None:
+    factory, settings = task_plan_database
+    user_id, task_id = create_task(factory)
+    planner = StaticPlanner()
+    with factory() as session:
+        user = session.get(User, user_id)
+        assert user is not None
+        cancelled = cancel_task_plan(
+            task_id,
+            request_without_origin(f"/api/v1/agent/task-plans/{task_id}/cancel"),
+            user,
+            session,
+            settings,
+        )
+        assert cancelled.status == "cancelled"
+
+    await run_task_plan(task_id, factory, settings, planner)
+    assert planner.calls == 0
+    with factory() as session:
+        run = session.get(AgentRun, task_id)
+        assert run is not None and run.status == "cancelled"
 
 
 def test_date_only_plan_defaults_to_nine_am_in_account_timezone() -> None:
