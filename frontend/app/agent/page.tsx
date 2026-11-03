@@ -246,20 +246,27 @@ export default function AgentTaskPlannerPage() {
           <button className="button button-secondary" disabled={workspaceLoading} onClick={() => void loadWorkspace()} type="button">刷新</button>
         </div>
         {workspaceLoading ? <p className="empty-state">正在载入运行记录…</p> : !workspace?.recent_runs.some((run) => run.task_type !== "task_plan") ? (
-          <p className="empty-state">岗位提取、公司研究和 Skills 等工作流的最近运行记录会显示在这里；提醒计划详见上方记录。</p>
+          <p className="empty-state">岗位提取、公司研究、个人资料问答和 Skills 等工作流的最近运行记录会显示在这里；提醒计划详见上方记录。</p>
         ) : (
           <ul className="agent-workspace-runs">
             {workspace.recent_runs.filter((run) => run.task_type !== "task_plan").map((run) => {
               const taskLabels: Record<string, string> = {
                 job_extraction: "岗位信息提取",
                 company_research: "公司研究",
+                knowledge_qa: "个人资料问答",
                 skill_workflow: run.skill_id ? `Skill · ${run.skill_id}` : "求职 Skill",
               };
               const statusLabels: Record<string, string> = {
                 queued: "排队中", running: "运行中", succeeded: "已完成",
                 failed: "失败", cancelled: "已取消", confirmed: "已确认",
               };
-              const href = run.task_type === "skill_workflow" ? "/skills" : run.task_type === "company_research" ? "/companies" : "/jobs";
+              const href = run.task_type === "skill_workflow"
+                ? "/skills"
+                : run.task_type === "company_research"
+                  ? "/companies"
+                  : run.task_type === "knowledge_qa"
+                    ? "/knowledge"
+                    : "/jobs";
               return (
                 <li key={run.id}>
                   <div><strong>{taskLabels[run.task_type] || "Agent 任务"}</strong><small>{run.job_label || "未关联岗位"} · {formatEventTime(run.created_at, workspace.timezone)}</small></div>

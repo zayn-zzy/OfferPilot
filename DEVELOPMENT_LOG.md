@@ -516,3 +516,22 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 
 - `backend/.venv/bin/pytest -o addopts='' -q tests/test_agent_workflow.py tests/test_task_planner.py tests/test_skills.py`，并运行公司搜索 Provider/MCP 的 6 个定向用例：共 28 项通过，覆盖统一路由、审批绑定、公司研究处理器成功/失败、引用保存、缓存、Skills 与提醒计划。
 - `backend/.venv/bin/python -m compileall -q app tests` 和 `git diff --check` 通过。公司研究既有 HTTP/ASGI 测试在测试环境等待未完成，未计为通过；新增直接调用 API 处理函数的集成测试覆盖了路由派发、结果和缓存。未调用真实 Tavily/LLM 服务或进行浏览器联调。
+
+## PRD §5.1、§5.2：个人资料 RAG 问答接入统一 Agent 路由
+
+### 完成内容
+
+- 将 `knowledge_qa` 注册为统一 LangGraph 任务类型。`POST /api/v1/knowledge/ask` 先保存 `AgentRun`，再由统一路由校验类型与 queued 状态并派发到现有 RAG 流程；接口仍同步返回原有问答和引用结构。
+- 为问答任务记录 queued、running、succeeded/failed 状态、检索/回答阶段事件、尝试次数和结果。未建立索引、检索证据不足时明确返回无证据答案；向量/回答 Provider 失败会保留可重试的失败记录和安全错误信息。
+- 保留用户级索引隔离、向量模型/维度校验、逐字引用校验；回答完成前重新检查引用片段仍属于当前用户，避免资料被删除或重建后保存失效引用。
+- Agent 工作区将最近问答任务标为“个人资料问答”，可跳转到资料页查看和继续使用。更新 README 与本开发日志，没有新增数据库表或迁移。
+
+### 技术与上一模块的区别
+
+上一模块把公司研究接入统一路由，并在执行前后检查岗位/公司归属；本次接入本地个人资料 RAG，重点是确认检索片段与问答运行属于同一用户，并在持久化前重新核验引用。向量检索、回答生成和引用规则仍由既有知识服务实现；统一 LangGraph 只负责有限任务分发和运行状态前置校验，不把简历正文或问答内容放进图状态。
+
+### 验证
+
+- `backend/.venv/bin/pytest -o addopts='' -q tests/test_agent_workflow.py`：7 项通过，覆盖统一派发、所有者引用、无索引无证据，以及 Provider 失败后的 AgentRun 记录。
+- RAG 定向测试 3 项通过，覆盖 Embeddings 维度校验、文本切块和 PostgreSQL 向量查询编译；`tests/test_task_planner.py tests/test_skills.py`：16 项通过。
+- `backend/.venv/bin/python -m compileall -q app tests`、前端 `bun run typecheck`、`git diff --check` 通过。使用 Fake Provider/SQLite 测试库，没有调用真实 LLM、向量服务或外部网络；未做浏览器端到端测试。

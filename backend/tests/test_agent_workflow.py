@@ -6,14 +6,26 @@ from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from starlette.requests import Request
 
 from app.core.config import Settings
 from app.main import create_app
-from app.models import AgentRun, ApprovalRequest, Base, Company, JobPosting, User, utc_now
+from app.models import (
+    AgentRun,
+    ApprovalRequest,
+    Base,
+    Company,
+    DocumentChunk,
+    JobPosting,
+    KnowledgeNote,
+    User,
+    utc_now,
+)
+from app.routes.agent import read_agent_workspace
+from app.routes.knowledge import ask_knowledge
 from app.services.agent_workflow import (
     AgentWorkflowState,
     SUPPORTED_AGENT_WORKFLOWS,
@@ -27,7 +39,13 @@ from app.services.company_research import (
     CompanyResearchFindingCandidate,
     PublicSearchSource,
 )
+from app.services.knowledge import (
+    CitationCandidate,
+    GroundedAnswerCandidate,
+    KnowledgeServiceError,
+)
 from app.routes.research import research_company_for_job
+from app.schemas import KnowledgeAsk
 
 
 @pytest.fixture
@@ -151,6 +169,28 @@ class FakeCompanyResearchSummarizer:
                 ]
             ),
             "test-research-model",
+        )
+
+
+class FakeKnowledgeEmbeddingProvider:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls = 0
+
+    async def embed(self, texts: list[str], settings: Settings):
+        self.calls += 1
+        if self.fail:
+            raise KnowledgeServiceError("embedding_timeout", "Expected test failure.")
+        return [[1.0, 0.0] for _ in texts], "test-embedding-model"
+
+
+class FakeKnowledgeAnswerProvider:
+    async def answer(self, question, chunks, settings):
+        chunk = chunks[0]
+        quote = chunk.content[: min(60, len(chunk.content))]
+        return GroundedAnswerCandidate(
+            answer="求职资料中记录了一个相关项目。",
+            citations=[CitationCandidate(chunk_id=chunk.id, quote=quote)],
         )
 
 
@@ -463,3 +503,136 @@ async def test_company_research_failure_is_saved_by_unified_router(
         assert stored.attempt_count == 1
         assert stored.error_code == "research_rate_limited"
         assert stored.events[-1]["event"] == "failed"
+
+
+@pytest.mark.anyio
+async def test_knowledge_qa_runs_through_router_and_keeps_owner_citations(
+    workflow_context: dict[str, object],
+) -> None:
+    note_content = "我在星河科技实习期间使用 Python 和 PostgreSQL 开发订单服务。"
+    with workflow_context["factory"]() as session:
+        owner = session.get(User, workflow_context["owner_id"])
+        other = session.get(User, workflow_context["other_id"])
+        assert owner is not None and other is not None
+        note = KnowledgeNote(user_id=owner.id, title="实习项目", content=note_content)
+        session.add(note)
+        session.flush()
+        session.add(
+            DocumentChunk(
+                user_id=owner.id,
+                source_type="note",
+                source_id=note.id,
+                source_name=note.title,
+                chunk_index=0,
+                content=note_content,
+                embedding=[1.0, 0.0],
+                embedding_dimensions=2,
+                embedding_model="test-embedding-model",
+            )
+        )
+        session.commit()
+        note_id = note.id
+
+    embedding_provider = FakeKnowledgeEmbeddingProvider()
+    app = create_app(
+        Settings(
+            _env_file=None,
+            environment="test",
+            database_url="sqlite://",
+            secret_key="knowledge-workflow-test-secret-long-enough",
+        ),
+        workflow_context["factory"],
+        embedding_provider=embedding_provider,
+        knowledge_answer_provider=FakeKnowledgeAnswerProvider(),
+    )
+    path = "/api/v1/knowledge/ask"
+    request = Request(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": b"",
+            "headers": [(b"origin", b"http://localhost:3000")],
+            "client": ("testclient", 123),
+            "server": ("testserver", 80),
+            "app": app,
+        }
+    )
+    with workflow_context["factory"]() as session:
+        owner = session.get(User, workflow_context["owner_id"])
+        assert owner is not None
+        response = await ask_knowledge(
+            KnowledgeAsk(question="我在实习项目中使用了什么技术？", top_k=3),
+            request,
+            owner,
+            session,
+            app.state.settings,
+        )
+    assert response.no_evidence is False
+    assert response.citations[0].source_id == note_id
+    assert response.citations[0].quote in note_content
+
+    with workflow_context["factory"]() as session:
+        other = session.get(User, workflow_context["other_id"])
+        assert other is not None
+        no_index = await ask_knowledge(
+            KnowledgeAsk(question="我的简历中有哪些项目经历？"),
+            request,
+            other,
+            session,
+            app.state.settings,
+        )
+        workspace_owner = session.get(User, workflow_context["owner_id"])
+        assert workspace_owner is not None
+        workspace = read_agent_workspace(workspace_owner, session)
+    assert no_index.no_evidence is True
+    assert no_index.citations == []
+    assert embedding_provider.calls == 1
+    assert any(run.task_type == "knowledge_qa" for run in workspace.recent_runs)
+
+    failing_app = create_app(
+        Settings(
+            _env_file=None,
+            environment="test",
+            database_url="sqlite://",
+            secret_key="knowledge-workflow-failure-test-secret",
+        ),
+        workflow_context["factory"],
+        embedding_provider=FakeKnowledgeEmbeddingProvider(fail=True),
+        knowledge_answer_provider=FakeKnowledgeAnswerProvider(),
+    )
+    with workflow_context["factory"]() as session:
+        owner = session.get(User, workflow_context["owner_id"])
+        assert owner is not None
+        with pytest.raises(HTTPException) as error:
+            await ask_knowledge(
+                KnowledgeAsk(question="模型不可用时任务应如何记录？"),
+                Request({**request.scope, "app": failing_app}),
+                owner,
+                session,
+                failing_app.state.settings,
+            )
+    assert error.value.status_code == 503
+
+    with workflow_context["factory"]() as session:
+        runs = session.scalars(
+            select(AgentRun)
+            .where(AgentRun.task_type == "knowledge_qa")
+        ).all()
+        assert len(runs) == 3
+        runs_by_question = {run.input_text: run for run in runs}
+        assert runs_by_question["我在实习项目中使用了什么技术？"].status == "succeeded"
+        assert (
+            runs_by_question["我在实习项目中使用了什么技术？"].result["citations"][0]["source_id"]
+            == str(note_id)
+        )
+        assert runs_by_question["我的简历中有哪些项目经历？"].result["no_evidence"] is True
+        failed = runs_by_question["模型不可用时任务应如何记录？"]
+        assert failed.status == "failed"
+        assert failed.attempt_count == 1
+        assert failed.error_code == "embedding_timeout"
+        assert failed.events[-1]["event"] == "failed"
