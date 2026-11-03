@@ -304,6 +304,25 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .agent-plan-confirmed { color: #28675b !important; }
 .agent-plan-confirmed a { font-weight: 700; text-decoration: underline; }
 .agent-planner-footnote { max-width: 900px; margin: 15px auto; padding: 0 24px; }
+.agent-workspace-heading { margin-top: 40px; }
+.agent-workspace-panel { max-width: 900px; }
+.agent-capability-grid { margin-top: 18px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
+.agent-capability-card { min-width: 0; padding: 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 9px; border: 1px solid #e5ece7; border-radius: 11px; background: #fbfdfb; }
+.agent-capability-heading { width: 100%; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.agent-capability-heading h3 { margin: 0; font-size: 13px; }
+.agent-capability-heading span { flex: 0 0 auto; padding: 4px 6px; border-radius: 6px; font-size: 9px; font-weight: 700; }
+.agent-capability-readonly { color: #526d61; background: #edf3ef; }
+.agent-capability-draft { color: #8a6129; background: #fbf3e5; }
+.agent-capability-card > p { min-height: 52px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.65; }
+.agent-capability-card > small { color: #7d8a84; font-size: 9px; }
+.agent-capability-card > a { margin-top: auto; color: var(--teal); font-size: 11px; font-weight: 700; }
+.agent-workspace-runs { margin: 16px 0 0; padding: 0; list-style: none; }
+.agent-workspace-runs li { min-height: 59px; padding: 10px 0; display: flex; align-items: center; gap: 12px; border-top: 1px solid #edf1ed; }
+.agent-workspace-runs li > div { min-width: 0; flex: 1; display: grid; gap: 4px; }
+.agent-workspace-runs li strong { font-size: 12px; }
+.agent-workspace-runs li small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.agent-workspace-runs li > span { flex: 0 0 auto; padding: 5px 7px; border-radius: 7px; color: #536a5e; background: #edf6f0; font-size: 9px; }
+.agent-workspace-runs li > a { flex: 0 0 auto; color: var(--teal); font-size: 10px; font-weight: 700; }
 
 @media (max-width: 700px) {
   .dashboard-page-topbar { overflow: hidden; }
@@ -331,6 +350,8 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
   .agent-planner-shell .dashboard-actions { max-width: 72vw; overflow-x: auto; gap: 13px; }
   .agent-planner-shell .dashboard-actions > * { flex: 0 0 auto; font-size: 11px; }
   .agent-planner-heading { margin-top: 38px; }
+  .agent-capability-grid { grid-template-columns: 1fr 1fr; }
+  .agent-capability-card > p { min-height: 0; }
   .agent-planner-form-footer { align-items: flex-start; flex-direction: column; }
   .agent-plan-heading { align-items: flex-start; }
 }
@@ -338,6 +359,7 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 @media (max-width: 420px) {
   .skill-template-grid { grid-template-columns: 1fr; }
   .skill-run-actions { align-items: flex-start; flex-direction: column; }
+  .agent-capability-grid { grid-template-columns: 1fr; }
 }
 
 .jobs-shell { min-height: 100vh; padding-bottom: 72px; background: radial-gradient(ellipse at 50% 0, #e4f2e9 0, var(--canvas) 38%); }

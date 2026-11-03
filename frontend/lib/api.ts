@@ -403,6 +403,34 @@ export type AgentTaskPlan = {
   finished_at: string | null;
 };
 
+export type AgentWorkspaceCapability = {
+  id: "reminder_plan" | "job_extraction" | "job_match" | "company_research" | "knowledge_qa" | "career_materials";
+  title: string;
+  description: string;
+  action_label: string;
+  href: string;
+  action_level: "read_only" | "local_draft";
+  confirmation_required: boolean;
+};
+
+export type AgentWorkspaceRun = {
+  id: string;
+  task_type: string;
+  skill_id: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+  job_id: string | null;
+  job_label: string | null;
+};
+
+export type AgentWorkspace = {
+  timezone: string;
+  capabilities: AgentWorkspaceCapability[];
+  recent_runs: AgentWorkspaceRun[];
+};
+
 export type JobSourceEvidence = {
   id: string;
   job_id: string;

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, apiRequest, type AgentTaskPlan } from "@/lib/api";
+import { ApiError, apiRequest, type AgentTaskPlan, type AgentWorkspace } from "@/lib/api";
 
 const STATUS_LABELS: Record<AgentTaskPlan["status"], string> = {
   queued: "排队中",
@@ -38,6 +38,7 @@ function formatEventTime(value: string | null, timezone: string) {
 
 export default function AgentTaskPlannerPage() {
   const [plans, setPlans] = useState<AgentTaskPlan[]>([]);
+  const [workspace, setWorkspace] = useState<AgentWorkspace | null>(null);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
   const [workingId, setWorkingId] = useState<string | null>(null);
@@ -45,6 +46,8 @@ export default function AgentTaskPlannerPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [requiresLogin, setRequiresLogin] = useState(false);
+  const [workspaceLoading, setWorkspaceLoading] = useState(true);
+  const [workspaceError, setWorkspaceError] = useState("");
   const idempotencyKey = useRef<string | null>(null);
 
   const loadPlans = useCallback(async () => {
@@ -60,9 +63,24 @@ export default function AgentTaskPlannerPage() {
     }
   }, []);
 
+  const loadWorkspace = useCallback(async () => {
+    try {
+      setWorkspace(await apiRequest<AgentWorkspace>("/api/v1/agent/workspace"));
+      setWorkspaceError("");
+    } catch (cause) {
+      setWorkspaceError(cause instanceof Error ? cause.message : "无法载入 Agent 工作区。");
+    } finally {
+      setWorkspaceLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void loadPlans();
   }, [loadPlans]);
+
+  useEffect(() => {
+    void loadWorkspace();
+  }, [loadWorkspace]);
 
   useEffect(() => {
     if (!plans.some((plan) => plan.status === "queued" || plan.status === "running")) return;
@@ -127,18 +145,42 @@ export default function AgentTaskPlannerPage() {
         </nav>
       </header>
 
-      <section className="agent-planner-heading">
-        <p className="eyebrow">Agent 任务计划</p>
-        <h1>把求职待办交给 Agent 整理</h1>
-        <p>用自然语言描述要做的事。系统会整理成带日期、动作和岗位对象的提醒草稿；你确认后才会写入提醒中心。</p>
+      <section className="agent-planner-heading agent-workspace-heading">
+        <p className="eyebrow">求职 Agent 工作区</p>
+        <h1>选择一项求职任务</h1>
+        <p>从统一入口进入岗位提取、匹配、公司研究、个人资料问答或材料准备。各项工作流会在确认前展示草稿和证据。</p>
       </section>
 
       {error && <div className="profile-message profile-error" role="alert">{error}{requiresLogin && <> <Link href="/login">去登录</Link></>}</div>}
       {notice && <div className="profile-message profile-success" role="status">{notice}</div>}
 
-      <section className="profile-panel agent-planner-panel">
+      <section className="profile-panel agent-workspace-panel" aria-labelledby="agent-capabilities-title">
         <div className="profile-panel-heading">
-          <div><p className="eyebrow">新建计划</p><h2>你接下来要做什么？</h2></div>
+          <div><p className="eyebrow">任务类型</p><h2 id="agent-capabilities-title">可用的求职工作流</h2></div>
+        </div>
+        {workspaceError && <div className="profile-message profile-error" role="alert">{workspaceError}</div>}
+        {workspaceLoading ? <p className="empty-state">正在载入任务类型…</p> : workspace && (
+          <div className="agent-capability-grid">
+            {workspace.capabilities.map((capability) => (
+              <article className="agent-capability-card" key={capability.id}>
+                <div className="agent-capability-heading">
+                  <h3>{capability.title}</h3>
+                  <span className={capability.action_level === "read_only" ? "agent-capability-readonly" : "agent-capability-draft"}>
+                    {capability.action_level === "read_only" ? "只读" : "生成草稿"}
+                  </span>
+                </div>
+                <p>{capability.description}</p>
+                <small>{capability.confirmation_required ? "涉及写入时需你确认" : "不会修改求职数据"}</small>
+                <Link href={capability.href}>{capability.action_label} →</Link>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="profile-panel agent-planner-panel" id="task-planner">
+        <div className="profile-panel-heading">
+          <div><p className="eyebrow">提醒计划</p><h2>用自然语言整理待办</h2></div>
         </div>
         <form className="agent-planner-form" onSubmit={createPlan}>
           <label htmlFor="task-request">任务描述</label>
@@ -198,7 +240,38 @@ export default function AgentTaskPlannerPage() {
           </div>
         )}
       </section>
-      <p className="agent-planner-footnote">Agent 只创建站内提醒，不会登录招聘网站、发送消息或更改投递进度。</p>
+      <section className="profile-panel agent-planner-panel">
+        <div className="profile-panel-heading">
+          <div><p className="eyebrow">跨工作流记录</p><h2>最近 Agent 运行</h2></div>
+          <button className="button button-secondary" disabled={workspaceLoading} onClick={() => void loadWorkspace()} type="button">刷新</button>
+        </div>
+        {workspaceLoading ? <p className="empty-state">正在载入运行记录…</p> : !workspace?.recent_runs.some((run) => run.task_type !== "task_plan") ? (
+          <p className="empty-state">岗位提取、公司研究和 Skills 等工作流的最近运行记录会显示在这里；提醒计划详见上方记录。</p>
+        ) : (
+          <ul className="agent-workspace-runs">
+            {workspace.recent_runs.filter((run) => run.task_type !== "task_plan").map((run) => {
+              const taskLabels: Record<string, string> = {
+                job_extraction: "岗位信息提取",
+                company_research: "公司研究",
+                skill_workflow: run.skill_id ? `Skill · ${run.skill_id}` : "求职 Skill",
+              };
+              const statusLabels: Record<string, string> = {
+                queued: "排队中", running: "运行中", succeeded: "已完成",
+                failed: "失败", cancelled: "已取消", confirmed: "已确认",
+              };
+              const href = run.task_type === "skill_workflow" ? "/skills" : run.task_type === "company_research" ? "/companies" : "/jobs";
+              return (
+                <li key={run.id}>
+                  <div><strong>{taskLabels[run.task_type] || "Agent 任务"}</strong><small>{run.job_label || "未关联岗位"} · {formatEventTime(run.created_at, workspace.timezone)}</small></div>
+                  <span>{statusLabels[run.status] || run.status}</span>
+                  <Link href={href}>打开</Link>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+      <p className="agent-planner-footnote">各工作流只在授权范围内读取资料。生成草稿不会自动改动投递状态；保存准备包前需要单独审批。MVP 不会登录招聘网站、发送消息或自动提交申请。</p>
     </main>
   );
 }

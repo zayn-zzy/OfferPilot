@@ -447,3 +447,21 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 
 - 后端 `.venv/bin/pytest -o addopts='' -q tests/test_dashboard.py`：2 项通过，覆盖投递阶段、提醒/跟进、截止日期和 Agent 运行聚合，以及用户间数据隔离。
 - `.venv/bin/python -m compileall -q app tests`、FastAPI OpenAPI 路由检查、前端 `bun run typecheck` 和 `git diff --check` 通过。未运行浏览器端到端或 PostgreSQL/Redis Compose 联调。
+
+## PRD Agent 工作区：任务类型入口与跨流程运行记录
+
+### 完成内容
+
+- `/agent` 增加由后端返回的任务类型目录：提醒计划、岗位抽取、岗位匹配、公司研究、个人资料问答和求职材料。每类显示用途、只读/生成草稿边界、是否需要用户确认及现有执行入口。
+- 新增 `GET /api/v1/agent/workspace`，聚合用户自己的最近岗位提取、公司研究和 Skills 运行摘要；按当前账户联查岗位/公司，仅返回任务类别、状态、时间与岗位标签，不返回原文输入、模型结果或错误正文。自然语言提醒计划仍由同页现有预览/确认流程展示，避免重复一份任务历史。
+- 岗位抽取入口可直接跳转到 `/jobs?task=extract` 并展开提取表单；其他能力跳转至已有的岗位、公司、资料或 Skills 专属流程。没有绕过各专属流程的用户确认和审批逻辑。
+- 复用 AgentRun 和现有业务接口，没有新增数据库迁移或外部副作用。
+
+### 技术与上一模块的区别
+
+上一模块将投递、提醒和 Agent 运行聚合到求职仪表盘；本次聚焦 PRD §6 的 Agent 工作区，增加明确的任务类型目录与跨工作流运行摘要。执行仍由现有岗位提取、提醒计划、公司研究、资料问答和 Skills 服务负责，工作区只是受控入口与可观测视图；单一 LangGraph 对所有任务类型统一编排仍是后续架构集成项，本次没有将独立流程伪装成一个统一执行图。
+
+### 验证
+
+- 后端 `.venv/bin/pytest -o addopts='' -q tests/test_agent_workspace.py`：2 项通过，覆盖能力目录/确认边界、跨流程运行摘要、隐私字段裁剪和用户隔离。
+- `.venv/bin/python -m compileall -q app tests`、FastAPI OpenAPI 路由检查、前端 `bun run typecheck` 和 `git diff --check` 通过。未运行浏览器端到端或真实模型联调。

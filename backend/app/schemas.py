@@ -472,6 +472,47 @@ class AgentTaskRead(BaseModel):
     finished_at: datetime | None
 
 
+class AgentCapabilityRead(BaseModel):
+    """A supported task and the existing workspace that safely executes it."""
+
+    id: Literal[
+        "reminder_plan",
+        "job_extraction",
+        "job_match",
+        "company_research",
+        "knowledge_qa",
+        "career_materials",
+    ]
+    title: str
+    description: str
+    action_label: str
+    href: str
+    action_level: Literal["read_only", "local_draft"]
+    confirmation_required: bool
+
+
+class AgentWorkspaceRunRead(BaseModel):
+    """Unified, privacy-minimal view of one persisted Agent run."""
+
+    id: UUID
+    task_type: str
+    skill_id: str | None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    finished_at: datetime | None
+    job_id: UUID | None
+    job_label: str | None
+
+
+class AgentWorkspaceRead(BaseModel):
+    """Task catalog and recent owner-scoped Agent runs for `/agent`."""
+
+    timezone: str
+    capabilities: list[AgentCapabilityRead]
+    recent_runs: list[AgentWorkspaceRunRead]
+
+
 class AgentTaskPlanCreate(BaseModel):
     """Natural-language request to draft a user-confirmed reminder."""
 

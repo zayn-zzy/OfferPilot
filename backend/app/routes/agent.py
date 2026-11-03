@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import Response, StreamingResponse
 from langgraph.graph import END, START, StateGraph
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -48,6 +48,9 @@ from app.schemas import (
     AgentTaskPlanRead,
     AgentTaskRead,
     AgentTaskSourceRead,
+    AgentCapabilityRead,
+    AgentWorkspaceRead,
+    AgentWorkspaceRunRead,
     JobExtractionConfirm,
     JobPostingRead,
     JobPostingWrite,
@@ -67,6 +70,62 @@ MAX_ATTEMPTS = 3
 MAX_ACTIVE_TASKS_PER_USER = 3
 MAX_TASK_PLAN_ATTEMPTS = 3
 TERMINAL_STATUSES = {"succeeded", "failed", "confirmed"}
+AGENT_WORKSPACE_CAPABILITIES = (
+    AgentCapabilityRead(
+        id="reminder_plan",
+        title="整理求职待办",
+        description="用自然语言描述动作和日期，生成提醒草稿；确认后才保存到提醒中心。",
+        action_label="规划提醒",
+        href="/agent#task-planner",
+        action_level="local_draft",
+        confirmation_required=True,
+    ),
+    AgentCapabilityRead(
+        id="job_extraction",
+        title="提取岗位信息",
+        description="从你粘贴的招聘原文提取岗位字段和引用，检查后再决定是否保存。",
+        action_label="粘贴招聘原文",
+        href="/jobs?task=extract",
+        action_level="local_draft",
+        confirmation_required=True,
+    ),
+    AgentCapabilityRead(
+        id="job_match",
+        title="查看岗位匹配",
+        description="逐项比较岗位条件与已确认档案/简历内容，展示证据和未知项，不估算录用概率。",
+        action_label="选择岗位",
+        href="/jobs",
+        action_level="read_only",
+        confirmation_required=False,
+    ),
+    AgentCapabilityRead(
+        id="company_research",
+        title="研究招聘公司",
+        description="查阅公开来源并显示引用、搜索时间和过期提示；来源不足时明确说明。",
+        action_label="查看公司档案",
+        href="/companies",
+        action_level="read_only",
+        confirmation_required=False,
+    ),
+    AgentCapabilityRead(
+        id="knowledge_qa",
+        title="询问个人求职资料",
+        description="基于已确认简历和个人笔记回答，并展示检索到的原文片段。",
+        action_label="提问并查看引用",
+        href="/knowledge",
+        action_level="read_only",
+        confirmation_required=False,
+    ),
+    AgentCapabilityRead(
+        id="career_materials",
+        title="准备求职材料",
+        description="选择岗位后生成岗位分析、简历建议、申请回答或面试准备草稿；保存准备包需要单独审批。",
+        action_label="选择 Skill 与岗位",
+        href="/skills",
+        action_level="local_draft",
+        confirmation_required=True,
+    ),
+)
 
 
 class TaskPlanWorkflowState(TypedDict, total=False):
@@ -127,6 +186,12 @@ def _owned_task(session: Session, user: User, task_id: UUID) -> AgentRun:
     return run
 
 
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _task_plan_read(run: AgentRun) -> AgentTaskPlanRead:
     result = run.result or {}
     preview_data = result.get("preview")
@@ -146,6 +211,52 @@ def _task_plan_read(run: AgentRun) -> AgentTaskPlanRead:
         created_at=run.created_at,
         updated_at=run.updated_at,
         finished_at=run.finished_at,
+    )
+
+
+@router.get("/workspace", response_model=AgentWorkspaceRead)
+def read_agent_workspace(
+    user: Annotated[User, Depends(current_user_dependency)],
+    session: Annotated[Session, Depends(session_dependency)],
+) -> AgentWorkspaceRead:
+    """Return supported task types and recent Agent runs for the signed-in user."""
+
+    runs = session.execute(
+        select(AgentRun, JobPosting, Company.name)
+        .outerjoin(
+            JobPosting,
+            and_(JobPosting.id == AgentRun.job_id, JobPosting.user_id == user.id),
+        )
+        .outerjoin(
+            Company,
+            and_(Company.id == JobPosting.company_id, Company.user_id == user.id),
+        )
+        .where(AgentRun.user_id == user.id, AgentRun.task_type != "task_plan")
+        .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+        .limit(10)
+    ).all()
+    recent_runs = [
+        AgentWorkspaceRunRead(
+            id=run.id,
+            task_type=run.task_type,
+            skill_id=run.skill_id,
+            status=run.status,
+            created_at=_as_utc(run.created_at),
+            updated_at=_as_utc(run.updated_at),
+            finished_at=_as_utc(run.finished_at) if run.finished_at else None,
+            job_id=job.id if job else None,
+            job_label=(
+                f"{company_name or '未填写公司'} · {job.title or '未填写职位'}"
+                if job
+                else None
+            ),
+        )
+        for run, job, company_name in runs
+    ]
+    return AgentWorkspaceRead(
+        timezone=user.timezone,
+        capabilities=list(AGENT_WORKSPACE_CAPABILITIES),
+        recent_runs=recent_runs,
     )
 
 

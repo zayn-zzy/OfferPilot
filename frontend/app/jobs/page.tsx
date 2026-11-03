@@ -177,6 +177,17 @@ export default function JobsPage() {
   }, []);
 
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("task") === "extract") {
+      setCreatePanel("extract");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (createPanel !== "extract") return;
+    document.getElementById("job-extraction-panel")?.scrollIntoView({ block: "start" });
+  }, [createPanel]);
+
+  useEffect(() => {
     apiRequest<ResumeVersionSummary[]>("/api/v1/resumes")
       .then(setResumes)
       .catch(() => setResumes([]));
@@ -377,7 +388,7 @@ export default function JobsPage() {
         <JobEditor onSave={createJob} onCancel={() => setCreatePanel(null)} />
       </section>}
 
-      {createPanel === "extract" && <section className="profile-panel job-form-panel">
+      {createPanel === "extract" && <section className="profile-panel job-form-panel" id="job-extraction-panel">
         <div className="profile-panel-heading"><div><p className="eyebrow">Agent 岗位抽取</p><h2>从招聘原文提取岗位字段</h2></div></div>
         <JobExtractionPanel onCancel={() => setCreatePanel(null)} onJobCreated={(saved) => {
           setCreatePanel(null);
