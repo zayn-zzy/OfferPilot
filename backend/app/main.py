@@ -20,12 +20,13 @@ from app.db import (
     is_missing_schema_error,
     session_dependency,
 )
-from app.models import AgentRun, Base, utc_now
+from app.models import AgentRun, AuditEvent, Base, ExternalActionApproval, utc_now
 from app.routes.agent import run_job_extraction, run_task_plan, router as agent_router
 from app.routes.account import router as account_router
 from app.routes.auth import router as auth_router
 from app.routes.companies import router as companies_router
 from app.routes.dashboard import router as dashboard_router
+from app.routes.external_actions import router as external_actions_router
 from app.routes.jobs import router as jobs_router
 from app.routes.knowledge import (
     run_knowledge_qa_workflow,
@@ -74,6 +75,7 @@ from app.services.agent_workflow import (
     build_agent_workflow_graph,
 )
 from app.services.agent_telemetry import request_id_middleware
+from app.services.external_actions import ExternalActionRegistry, SMTPEmailActionHandler
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +99,7 @@ def create_app(
     company_research_summarizer: CompanyResearchSummaryProvider | None = None,
     skill_provider: SkillProvider | None = None,
     task_planner_provider: TaskPlannerProvider | None = None,
+    external_action_registry: ExternalActionRegistry | None = None,
 ) -> FastAPI:
     """Create an app instance, optionally injecting test settings and a database."""
 
@@ -143,6 +146,37 @@ def create_app(
                             },
                         ]
                     session.commit()
+            if engine is not None and inspect(engine).has_table("external_action_approvals"):
+                with factory() as session:
+                    interrupted_actions = session.query(ExternalActionApproval).filter_by(
+                        status="executing"
+                    ).all()
+                    for action in interrupted_actions:
+                        action.status = "outcome_unknown"
+                        action.updated_at = utc_now()
+                        action.result = {
+                            "message": (
+                                "API 服务在发送期间重启；"
+                                "请人工核对收件箱，不要直接重试。"
+                            )
+                        }
+                        session.add(
+                            AuditEvent(
+                                user_id=action.user_id,
+                                approval_id=None,
+                                action="external_action_outcome_unknown",
+                                entity_type="external_action",
+                                entity_id=str(action.id),
+                                details={
+                                    "action_type": action.action_type,
+                                    "target": action.target,
+                                    "payload_hash": action.payload_hash,
+                                    "reason": "api_restarted_during_execution",
+                                },
+                            )
+                        )
+                    if interrupted_actions:
+                        session.commit()
             yield
         finally:
             if engine is not None:
@@ -170,6 +204,9 @@ def create_app(
     )
     app.state.skill_provider = skill_provider or OpenAICompatibleSkillProvider()
     app.state.task_planner_provider = task_planner_provider or OpenAICompatibleTaskPlanner()
+    app.state.external_action_registry = external_action_registry or ExternalActionRegistry(
+        [SMTPEmailActionHandler()]
+    )
     app.state.skill_checkpoint_saver = in_memory_checkpointer_for(app_settings.database_url)
 
     async def dispatch_task_plan(state: AgentWorkflowState) -> dict[str, object]:
@@ -294,6 +331,7 @@ def create_app(
     app.include_router(reminders_router, prefix="/api/v1")
     app.include_router(notifications_router, prefix="/api/v1")
     app.include_router(skills_router, prefix="/api/v1")
+    app.include_router(external_actions_router, prefix="/api/v1")
 
     @app.get("/health", response_model=HealthRead, tags=["system"])
     def health(

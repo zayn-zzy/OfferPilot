@@ -1,6 +1,6 @@
 # OfferPilot
 
-面向秋招求职流程的 Agent 工作台。当前已实现账户认证、个人档案、简历版本管理、岗位管理、Agent 岗位抽取、个人资料 RAG 问答、透明岗位匹配、MCP 公司研究、提醒中心，以及版本化求职 Skills 与审批保存流程；后续按 [PRD](秋招求职%20Agent%20产品需求文档.md) 分模块推进。
+面向秋招求职流程的 Agent 工作台。当前已实现账户认证、个人档案、简历版本管理、岗位管理、Agent 岗位抽取、个人资料 RAG 问答、透明岗位匹配、MCP 公司研究、提醒中心、版本化求职 Skills，以及审批后发送邮件的外部动作闭环；后续按 [PRD](秋招求职%20Agent%20产品需求文档.md) 分模块推进。
 
 ## 技术栈
 
@@ -112,12 +112,25 @@ uv run offerpilot-research-mcp
 
 简历相关 Skills 会读取最新一份已确认简历；岗位描述、个人档案、简历和研究片段会发送到当前配置的 Chat Completions 服务。系统把这些资料作为不可信输入，不执行其中的指令；模型引用必须逐字出现在对应资料中，否则移除引用并标记需要人工核对。没有证据支持的个人经历必须留作待补充项。
 
-申请准备包可以先预览。用户请求保存后会生成有效期 30 分钟的审批；“批准”和“执行”是两个独立 API 阶段。执行前服务端会重新计算准备包内容与目标岗位的哈希；发生变化或审批过期时拒绝执行。MVP 的 allowlist 只有“保存准备包到 OfferPilot 本地工作台”，所有审批和保存均记录在审计列表；不登录招聘网站、不自动投递、不发送邮件或同步外部日历。API / 页面首次启用前需要运行数据库迁移：
+申请准备包可以先预览。用户请求保存后会生成有效期 30 分钟的审批；“批准”和“执行”是两个独立 API 阶段。执行前服务端会重新计算准备包内容与目标岗位的哈希；发生变化或审批过期时拒绝执行。外部动作工作台 `/actions` 另外支持经 SMTP 发送纯文本邮件：可以从申请问答 Skill 把草稿载入邮件正文，用户编辑后查看收件人、主题和完整正文，先批准，再点击“最终确认并发送”。审批仅绑定这份具体内容和目标，15 分钟过期；幂等键避免重复创建，发送结果不确定时记录为“待核对”且不自动重试。API 重启时中断中的发送也会变成待核对。所有审批与执行事件进入账户审计记录。MVP 仍不登录/提交招聘网站、不自动投递或完成测评；外部邮件发送只有服务端配置 SMTP 后才可用。API / 页面首次启用前需要运行数据库迁移：
 
 ```bash
 cd backend
 uv run alembic upgrade head
 ```
+
+邮件发送配置放在仓库根 `.env`（Compose）或 `backend/.env`（本地 API），不要提交 SMTP 密码：
+
+```dotenv
+OFFERPILOT_SMTP_HOST=smtp.example.com
+OFFERPILOT_SMTP_PORT=587
+OFFERPILOT_SMTP_USERNAME=your-smtp-user
+OFFERPILOT_SMTP_PASSWORD=your-app-password
+OFFERPILOT_SMTP_SENDER=your-address@example.com
+OFFERPILOT_SMTP_USE_SSL=false
+```
+
+587 端口强制 STARTTLS；隐式 TLS 通常使用 465 端口并设置 `OFFERPILOT_SMTP_USE_SSL=true`。SMTP 账号由服务端共享，因此仅应在个人演示/可信环境启用。邮件内容由用户提供或从已成功的申请问答草稿载入；系统不会自动寻找联系人，也不会自动生成收件人。
 
 岗位提取、岗位匹配、提醒计划、公司研究、个人资料问答和 Skills 的持久化任务由 `app.services.agent_workflow` 的统一 LangGraph 路由分发；路由会核对 `AgentRun` 的任务类型与状态。岗位匹配复用确定性规则，对硬性条件、偏好和简历原文证据逐项比较，不调用模型，也不生成录用概率；公司研究在执行前再次校验岗位和公司归属，继续通过 MCP 调用只读搜索并保留可核验引用；个人资料问答按账户检索已索引的简历和笔记，并校验返回引用确实来自检索片段；Skills 审批恢复还会校验审批记录、运行记录、账户和决定是否一致。路由图状态只放任务 ID、任务类型、操作类型和审批 ID/决定，不放原文或模型草稿正文。各专属流程仍负责自身的处理步骤和业务写入；例如 Skill 由 API 进程内后台任务触发，并由内部 `StateGraph` 编排“上下文校验 → 草稿生成 → 引用校验 → 人工审批 → 本地保存”。`AgentRun` 保存面向产品的状态、步骤、结果和错误；LangGraph checkpointer 保存暂停/恢复所需的图状态。PostgreSQL 使用 LangGraph PostgreSQL checkpointer；SQLite 本地模式将检查点放在 `storage/langgraph-checkpoints.sqlite3`，与业务库分开。图调用使用 LangGraph v2 异步结果格式；Skill 适配层会保留现有审批中断返回结构。
 
@@ -193,6 +206,9 @@ uv run scripts/check_agent_job_visibility.py
 - `GET /api/v1/auth/me`：获取当前账户。
 - `GET /api/v1/dashboard`：按当前账户汇总投递阶段、未来 7 天提醒/跟进、未来 14 天岗位截止日期和最近 5 条 Agent 运行记录。
 - `GET /api/v1/agent/workspace`：返回受支持的 Agent 任务类型、对应入口和最近的岗位提取/岗位匹配/公司研究/个人资料问答/Skills 等运行摘要；不返回任务原文或模型结果。
+- `GET /api/v1/external-actions/capabilities`：返回已启用的外部动作执行器能力；不返回 SMTP 凭证。
+- `GET/POST /api/v1/external-actions`：列出当前账户动作或创建一封待审批邮件；创建不会发送邮件，支持幂等键。
+- `POST /api/v1/external-actions/{id}/approve`、`/reject`、`/execute`：审批、拒绝或执行外部邮件动作；发送前复核内容哈希和有效期，执行结果不确定时禁止自动重试。
 - `PUT /api/v1/auth/me/timezone`：更新账户 IANA 时区；必须显式确认重新计算所有未来提醒。
 - `GET /api/v1/account/export`：下载当前账户的 ZIP 数据包，包含账户资料、业务记录、解析后的简历文本和服务器仍保存的简历原件；不包含密码哈希、服务 API 密钥或派生向量数值。
 - `DELETE /api/v1/account/me`：永久删除当前账户及其业务记录、向量索引和账户文件；需要再次提交当前密码和账户邮箱。

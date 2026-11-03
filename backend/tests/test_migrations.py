@@ -93,6 +93,7 @@ async def test_upgrade_existing_profile_database_preserves_data_and_enables_jobs
                 "approval_requests",
                 "application_prep_packs",
                 "audit_events",
+                "external_action_approvals",
             }.issubset(inspect(engine).get_table_names())
             assert "timezone" in {
                 column["name"] for column in inspect(engine).get_columns("users")

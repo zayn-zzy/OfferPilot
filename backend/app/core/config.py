@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     tavily_api_key: SecretStr = SecretStr("")
     tavily_usd_per_search: float | None = Field(default=None, ge=0, le=1_000)
     research_timeout_seconds: float = Field(default=12.0, gt=0, le=60)
+    smtp_host: str = Field(default="", max_length=255)
+    smtp_port: int = Field(default=587, ge=1, le=65_535)
+    smtp_username: str = Field(default="", max_length=320)
+    smtp_password: SecretStr = SecretStr("")
+    smtp_sender: str = Field(default="", max_length=320)
+    smtp_use_ssl: bool = False
+    smtp_timeout_seconds: float = Field(default=15.0, gt=0, le=60)
     celery_broker_url: str = "redis://localhost:6379/0"
 
 

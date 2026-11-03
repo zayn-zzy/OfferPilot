@@ -295,7 +295,7 @@ export default function AgentTaskPlannerPage() {
           </ul>
         )}
       </section>
-      <p className="agent-planner-footnote">各工作流只在授权范围内读取资料。生成草稿不会自动改动投递状态；保存准备包前需要单独审批。MVP 不会登录招聘网站、发送消息或自动提交申请。</p>
+      <p className="agent-planner-footnote">各工作流只在授权范围内读取资料。生成草稿不会自动改动投递状态；本地保存与外部邮件发送分别需要审批。MVP 不会登录或提交招聘网站，也不会代替用户完成测评。</p>
     </main>
   );
 }

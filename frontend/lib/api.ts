@@ -571,6 +571,39 @@ export type SkillAuditEvent = {
   created_at: string;
 };
 
+export type ExternalActionStatus =
+  | "pending"
+  | "approved"
+  | "executing"
+  | "executed"
+  | "rejected"
+  | "expired"
+  | "invalidated"
+  | "outcome_unknown";
+
+export type ExternalAction = {
+  id: string;
+  job_id: string | null;
+  action_type: string;
+  target: string;
+  summary: string;
+  payload: { subject: string; body: string };
+  status: ExternalActionStatus;
+  result: Record<string, unknown> | null;
+  expires_at: string;
+  approved_at: string | null;
+  started_at: string | null;
+  executed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ExternalActionCapabilities = {
+  email_send_enabled: boolean;
+  email_send_requires_approval: true;
+  recruitment_submission_enabled: false;
+};
+
 export async function apiRequest<T = void>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   if (typeof options.body === "string" && !headers.has("Content-Type")) {

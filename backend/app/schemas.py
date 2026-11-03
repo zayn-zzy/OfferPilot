@@ -933,6 +933,82 @@ class ApprovalRequestRead(BaseModel):
     created_at: datetime
 
 
+ExternalActionStatus = Literal[
+    "pending",
+    "approved",
+    "executing",
+    "executed",
+    "rejected",
+    "expired",
+    "invalidated",
+    "outcome_unknown",
+]
+
+
+class ExternalEmailActionCreate(BaseModel):
+    """Exact plain-text email content to review before sending."""
+
+    job_id: UUID | None = None
+    recipient: EmailStr
+    subject: str = Field(min_length=1, max_length=200)
+    body: str = Field(min_length=1, max_length=20_000)
+    idempotency_key: str = Field(min_length=16, max_length=128)
+
+    @field_validator("recipient")
+    @classmethod
+    def normalize_recipient(cls, value: str) -> str:
+        return value.strip().lower()
+
+    @field_validator("subject")
+    @classmethod
+    def normalize_subject(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized or "\r" in normalized or "\n" in normalized:
+            raise ValueError("邮件主题不能为空或包含换行")
+        return normalized
+
+    @field_validator("body")
+    @classmethod
+    def normalize_body(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("邮件正文不能为空")
+        return normalized
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def normalize_idempotency_key(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 16:
+            raise ValueError("幂等键至少需要 16 个字符")
+        return normalized
+
+
+class ExternalActionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    job_id: UUID | None
+    action_type: str
+    target: str
+    summary: str
+    payload: dict[str, str]
+    status: ExternalActionStatus
+    result: dict[str, object] | None
+    expires_at: datetime
+    approved_at: datetime | None
+    started_at: datetime | None
+    executed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ExternalActionCapabilitiesRead(BaseModel):
+    email_send_enabled: bool
+    email_send_requires_approval: Literal[True] = True
+    recruitment_submission_enabled: Literal[False] = False
+
+
 class ApplicationPrepPackRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

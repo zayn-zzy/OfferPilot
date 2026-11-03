@@ -24,6 +24,7 @@ from app.models import (
     CandidateProfile,
     Company,
     DocumentChunk,
+    ExternalActionApproval,
     JobPosting,
     KnowledgeNote,
     Notification,
@@ -131,6 +132,19 @@ def test_export_contains_owned_records_and_uploaded_original(account_context: di
                 ),
                 KnowledgeNote(user_id=owner.id, title="项目笔记", content="负责检索系统"),
                 KnowledgeNote(user_id=other.id, title="私有笔记", content="不应导出"),
+                ExternalActionApproval(
+                    user_id=owner.id,
+                    action_type="email.send",
+                    target="recruiter@example.com",
+                    summary="发送求职邮件",
+                    payload={"subject": "应聘", "body": "经本人核对的邮件正文"},
+                    idempotency_key="account-export-action-01",
+                    request_hash="1" * 64,
+                    payload_hash="2" * 64,
+                    approval_hash="3" * 64,
+                    status="pending",
+                    expires_at=utc_now(),
+                ),
                 DocumentChunk(
                     user_id=owner.id,
                     source_type="note",
@@ -156,6 +170,9 @@ def test_export_contains_owned_records_and_uploaded_original(account_context: di
         assert [row["filename"] for row in manifest["data"]["resume_versions"]] == ["my-resume.pdf"]
         assert [row["title"] for row in manifest["data"]["knowledge_notes"]] == ["项目笔记"]
         assert manifest["data"]["document_chunks"][0]["content"] == "负责检索系统"
+        assert manifest["data"]["external_action_approvals"][0]["payload"]["body"] == (
+            "经本人核对的邮件正文"
+        )
         assert "embedding" not in manifest["data"]["document_chunks"][0]
         assert "password_hash" not in archive_bytes.decode("utf-8", errors="ignore")
         assert "不应导出" not in archive_bytes.decode("utf-8", errors="ignore")
@@ -235,6 +252,19 @@ def test_delete_removes_account_records_indexes_files_and_cookie(account_context
                     status="succeeded",
                     input_text="招聘原文",
                     events=[],
+                ),
+                ExternalActionApproval(
+                    user_id=owner.id,
+                    action_type="email.send",
+                    target="recruiter@example.com",
+                    summary="待发送邮件",
+                    payload={"subject": "应聘", "body": "正文"},
+                    idempotency_key="account-delete-action-01",
+                    request_hash="4" * 64,
+                    payload_hash="5" * 64,
+                    approval_hash="6" * 64,
+                    status="pending",
+                    expires_at=utc_now(),
                 ),
             ]
         )

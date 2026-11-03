@@ -21,10 +21,12 @@ from app.models import (
     ApprovalRequest,
     AuditEvent,
     Company,
+    ExternalActionApproval,
     JobSourceEvidence,
     JobPosting,
     ResumeVersion,
     User,
+    utc_now,
 )
 from app.routes.auth import (
     current_user_dependency,
@@ -791,6 +793,32 @@ def delete_job(
             )
         )
         session.execute(delete(AgentRun).where(AgentRun.id.in_(run_ids)))
+    linked_actions = session.scalars(
+        select(ExternalActionApproval).where(
+            ExternalActionApproval.job_id == job.id,
+            ExternalActionApproval.user_id == user.id,
+        )
+    ).all()
+    for action in linked_actions:
+        action.job_id = None
+        if action.status in {"pending", "approved"}:
+            action.status = "invalidated"
+            action.updated_at = utc_now()
+            session.add(
+                AuditEvent(
+                    user_id=user.id,
+                    approval_id=None,
+                    action="external_action_invalidated",
+                    entity_type="external_action",
+                    entity_id=str(action.id),
+                    details={
+                        "action_type": action.action_type,
+                        "target": action.target,
+                        "payload_hash": action.payload_hash,
+                        "reason": "associated_job_deleted",
+                    },
+                )
+            )
     session.delete(job)
     session.commit()
     return None

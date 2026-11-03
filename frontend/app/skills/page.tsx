@@ -251,6 +251,7 @@ export default function SkillsPage() {
           <Link className="text-link" href="/knowledge">资料问答</Link>
           <Link className="text-link" href="/jobs">岗位管理</Link>
           <Link className="text-link" href="/reminders">提醒中心</Link>
+          <Link className="text-link" href="/actions">外部动作</Link>
           <button className="text-button" onClick={() => void logout()} type="button">退出登录</button>
         </nav>
       </header>
@@ -351,6 +352,7 @@ export default function SkillsPage() {
               </blockquote>)}</div>}
             </section>)}
             {activeRun.result.open_questions.length > 0 && <section><h4>需要你补充的问题</h4><ul className="skill-open-questions">{activeRun.result.open_questions.map((question, index) => <li key={`${question}-${index}`}>{question}</li>)}</ul></section>}
+            {activeRun.skill_id === "application_answers" && <Link className="text-link external-action-draft-link" href={`/actions?skill_run_id=${activeRun.id}`}>把申请问答草稿载入外部邮件审批</Link>}
             {activeRun.skill_id === "application_prep_pack" && <div className="skill-approval-area">
               {canRequestApproval && <button className="button button-secondary" disabled={working} onClick={() => void requestApproval(activeRun)} type="button">{latestRunApproval ? "重新申请保存审批" : "申请保存到工作台"}</button>}
               {activeApproval?.status === "pending" && <div className="skill-approval-card"><strong>待确认操作</strong><p>{activeApproval.summary}</p><small>审批有效期至 {new Date(activeApproval.expires_at).toLocaleString("zh-CN")}</small><div><button className="button button-primary" disabled={working} onClick={() => void approveAndSave(activeApproval)} type="button">核对后批准并保存</button><button className="button button-secondary" disabled={working} onClick={() => void rejectApproval(activeApproval)} type="button">拒绝</button></div></div>}

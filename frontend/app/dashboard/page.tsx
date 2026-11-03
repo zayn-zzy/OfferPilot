@@ -112,6 +112,7 @@ export default function DashboardPage() {
           <Link className="text-link" href="/knowledge">资料问答</Link>
           <Link className="text-link" href="/agent">任务计划</Link>
           <Link className="text-link" href="/skills">Skills</Link>
+          <Link className="text-link" href="/actions">外部动作</Link>
           <Link className="text-link" href="/reminders">提醒</Link>
           <Link className="text-link" href="/settings">设置</Link>
           <button className="text-button" disabled={loggingOut} onClick={() => void logout()} type="button">

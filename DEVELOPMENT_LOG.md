@@ -623,3 +623,25 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 - `tests/test_task_planner.py`：6 项通过，新增覆盖排队取消跳过 Provider、运行中取消丢弃结果且不创建提醒。
 - `tests/test_agent.py` 中提取幂等及取消用例：4 项通过；`tests/test_skills.py` 全文件 14 项通过，覆盖运行中/排队取消及原有草稿、审批流程。
 - 后端 `compileall`、前端 `bun run typecheck` 与 `git diff --check` 通过。未调用真实模型；完整 `test_agent.py` 的 ASGI 注册用例此前存在挂起，本次使用定向生命周期测试验证。
+
+## PRD F-17：外部动作审批与邮件执行
+
+### 完成内容
+
+- 新增独立的 `ExternalActionApproval` 记录和迁移 `20261104_0009`，保存当前账户、动作种类、收件目标、邮件正文、幂等键、内容/审批摘要哈希、审批期限和执行结果。记录会进入账户导出，并随账户删除。
+- 新增 `/actions` 工作台和审批/执行 API。当前唯一 allowlist 动作为纯文本邮件：可从成功的申请问答 Skill 载入草稿；用户仍需填写收件人、检查完整正文、单独批准，再次确认发送。招聘网站提交、测评和任意工具调用没有执行器。
+- SMTP 使用服务端配置的认证账户；587 强制 STARTTLS，465 可选隐式 TLS。API 不返回凭证。动作审批有效 15 分钟，最多保留 5 个未完成审批；重复请求按唯一约束与幂等键处理。
+- 执行前服务端重新校验动作类型、内容哈希、审批摘要、目标、账户与期限；数据库条件更新保证同一审批只会被一个请求领取执行。发送中 API 重启或 SMTP 结果不确定时记为 `outcome_unknown`，不自动重发，避免重复邮件。
+- 审批、拒绝、执行开始、执行完成、过期、失效和不确定结果都写入审计记录。删除关联岗位会让尚未执行的审批失效。
+- 更新 Compose 与 `.env.example` 的 SMTP 配置、README 使用说明、账户数据控制、工作台导航和 Skills 草稿入口。
+
+### 技术与上一模块的区别
+
+上一模块统一了 Agent 后台任务生命周期；本次新增的是外部副作用的独立审批账本与执行器边界。审批对象绑定不可变内容哈希，审批与执行是两个明确操作。SMTP 副作用无法与本地数据库事务组成原子事务，因此采用先持久化 `executing`、再发送、最后记录结果的流程；进程中断时落为待人工核对状态，不猜测发送成功与否，也不自动重试。
+
+### 验证
+
+- `tests/test_external_actions.py` 与 `tests/test_account_data_controls.py`：12 项通过，覆盖审批前不发送、幂等与冲突、用户隔离、过期/篡改失效、SMTP TLS 顺序、执行只发送一次、结果未知不重试、API 重启恢复、岗位删除与账户导出/删除。
+- `tests/test_skills.py`：14 项通过；前端 `bun run typecheck`、后端 `compileall`、OpenAPI 路由注册与 `git diff --check` 通过。
+- 独立临时 SQLite 数据库完整执行 `alembic upgrade head`，确认 `external_action_approvals` 已创建。集成迁移用例因既有 ASGI 注册请求长时间无输出而停止；没有把它报告为通过。
+- 未配置真实 SMTP 凭证，也未向真实收件人发信；SMTP 连接行为由假 SMTP 客户端验证。配置 SMTP 后可在 `/actions` 手动检查真实邮件链路。
