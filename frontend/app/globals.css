@@ -6,15 +6,39 @@
   --canvas: #f5f8f5;
   --line: #e0e9e3;
   --white: #ffffff;
+  --font-sans: "DM Sans", "Noto Sans SC", sans-serif;
+  --agent-muted: #5f726e;
+  --agent-field-edge: #89968f;
+  --error: #983c3c;
+  --error-surface: #fff0ed;
+  --warning: #805b20;
+  --warning-surface: #fbf3e5;
+  --success: #28675b;
+  --success-surface: #edf6f0;
+  --focus: var(--teal);
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.2rem;
+  --text-xl: 1.44rem;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius-control: 8px;
+  --radius-surface: 8px;
 }
 
 * { box-sizing: border-box; }
+html, body { overflow-x: clip; }
 
 body {
   margin: 0;
   color: var(--ink);
   background: var(--canvas);
-  font-family: "DM Sans", "Noto Sans SC", sans-serif;
+  font-family: var(--font-sans);
 }
 
 a { color: inherit; text-decoration: none; }
@@ -310,52 +334,7 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
 .skill-audit-list strong { font-size: 11px; }
 .skill-audit-list small, .skill-audit-list time { color: var(--muted); font-size: 10px; }
 
-.agent-planner-shell { min-height: 100vh; padding-bottom: 72px; background: radial-gradient(ellipse at 50% 0, #e4f2e9 0, var(--canvas) 38%); }
-.agent-planner-shell .dashboard-topbar { max-width: 1220px; }
-.agent-planner-heading { max-width: 900px; margin: 48px auto 28px; padding: 0 24px; }
-.agent-planner-heading .eyebrow { margin-bottom: 8px; }
-.agent-planner-heading h1 { font-size: clamp(30px, 4vw, 42px); }
-.agent-planner-heading > p:last-child { max-width: 700px; color: var(--muted); font-size: 13px; line-height: 1.8; }
-.agent-planner-panel { max-width: 900px; }
-.agent-planner-form { margin-top: 20px; display: grid; gap: 10px; }
-.agent-planner-form label { font-size: 12px; font-weight: 700; }
-.agent-planner-form textarea { width: 100%; padding: 12px 13px; border: 1px solid #dce6df; border-radius: 9px; outline: none; color: var(--ink); background: #fcfdfc; font: inherit; font-size: 13px; line-height: 1.7; resize: vertical; }
-.agent-planner-form textarea:focus { border-color: #76aa9b; box-shadow: 0 0 0 3px #26786e14; }
-.agent-planner-form-footer { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
-.agent-planner-form-footer span, .agent-planner-footnote { color: var(--muted); font-size: 11px; line-height: 1.7; }
-.agent-planner-form-footer .button { flex: 0 0 auto; }
-.agent-plan-list { margin-top: 18px; display: grid; gap: 11px; }
-.agent-plan-card { padding: 16px; border: 1px solid var(--line); border-radius: 11px; background: #fff; }
-.agent-plan-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 13px; }
-.agent-plan-heading .eyebrow { margin: 0 0 5px; font-size: 10px; letter-spacing: .04em; text-transform: none; }
-.agent-plan-heading h3 { margin: 0; font-size: 15px; }
-.agent-plan-card > p { margin: 11px 0 0; color: #526860; font-size: 12px; line-height: 1.65; }
-.agent-plan-card > p strong { color: var(--ink); }
-.agent-plan-actions { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; }
-.agent-plan-actions .button, .agent-plan-card .agent-task-error .button { min-height: 38px; font-size: 11px; }
 .agent-plan-notice { margin-top: 13px; padding: 11px 13px; border-radius: 8px; color: #805b20; background: #fbf3e5; font-size: 12px; line-height: 1.7; }
-.agent-plan-confirmed { color: #28675b !important; }
-.agent-plan-confirmed a { font-weight: 700; text-decoration: underline; }
-.agent-planner-footnote { max-width: 900px; margin: 15px auto; padding: 0 24px; }
-.agent-workspace-heading { margin-top: 40px; }
-.agent-workspace-panel { max-width: 900px; }
-.agent-capability-grid { margin-top: 18px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
-.agent-capability-card { min-width: 0; padding: 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 9px; border: 1px solid #e5ece7; border-radius: 11px; background: #fbfdfb; }
-.agent-capability-heading { width: 100%; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.agent-capability-heading h3 { margin: 0; font-size: 13px; }
-.agent-capability-heading span { flex: 0 0 auto; padding: 4px 6px; border-radius: 6px; font-size: 9px; font-weight: 700; }
-.agent-capability-readonly { color: #526d61; background: #edf3ef; }
-.agent-capability-draft { color: #8a6129; background: #fbf3e5; }
-.agent-capability-card > p { min-height: 52px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.65; }
-.agent-capability-card > small { color: #7d8a84; font-size: 9px; }
-.agent-capability-card > a { margin-top: auto; color: var(--teal); font-size: 11px; font-weight: 700; }
-.agent-workspace-runs { margin: 16px 0 0; padding: 0; list-style: none; }
-.agent-workspace-runs li { min-height: 59px; padding: 10px 0; display: flex; align-items: center; gap: 12px; border-top: 1px solid #edf1ed; }
-.agent-workspace-runs li > div { min-width: 0; flex: 1; display: grid; gap: 4px; }
-.agent-workspace-runs li strong { font-size: 12px; }
-.agent-workspace-runs li small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.agent-workspace-runs li > span { flex: 0 0 auto; padding: 5px 7px; border-radius: 7px; color: #536a5e; background: #edf6f0; font-size: 9px; }
-.agent-workspace-runs li > a { flex: 0 0 auto; color: var(--teal); font-size: 10px; font-weight: 700; }
 
 @media (max-width: 700px) {
   .dashboard-page-topbar { overflow: hidden; }
@@ -380,20 +359,11 @@ h1 { margin: 0; color: var(--ink); font-size: clamp(36px, 5.2vw, 58px); line-hei
   .skill-contract-grid { grid-template-columns: 1fr; }
   .skill-saved-packs summary { flex-direction: column; }
   .skill-audit-list li { flex-direction: column; gap: 5px; }
-  .agent-planner-shell .dashboard-topbar { overflow: hidden; }
-  .agent-planner-shell .dashboard-actions { max-width: 72vw; overflow-x: auto; gap: 13px; }
-  .agent-planner-shell .dashboard-actions > * { flex: 0 0 auto; font-size: 11px; }
-  .agent-planner-heading { margin-top: 38px; }
-  .agent-capability-grid { grid-template-columns: 1fr 1fr; }
-  .agent-capability-card > p { min-height: 0; }
-  .agent-planner-form-footer { align-items: flex-start; flex-direction: column; }
-  .agent-plan-heading { align-items: flex-start; }
 }
 
 @media (max-width: 420px) {
   .skill-template-grid { grid-template-columns: 1fr; }
   .skill-run-actions { align-items: flex-start; flex-direction: column; }
-  .agent-capability-grid { grid-template-columns: 1fr; }
 }
 
 .jobs-shell { min-height: 100vh; padding-bottom: 72px; background: radial-gradient(ellipse at 50% 0, #e4f2e9 0, var(--canvas) 38%); }

@@ -37,3 +37,4 @@ backend/storage/
 .idea/
 .vscode/
 *.swp
+.hallmark/
