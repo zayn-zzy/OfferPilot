@@ -162,6 +162,8 @@ OfferPilot 是面向应届生的求职流程管理与准备助手。它把分散
 6. **提醒中心：** 日期视图、提醒配置、完成/延期操作和通知历史。
 7. **设置与数据控制：** 时区、通知渠道、LLM 配置、数据导出与删除。
 
+工作区采用统一可折叠侧栏与顶部工具栏；移动端使用抽屉导航。界面支持浅色、深色和跟随系统主题，并提供仅跳转现有页面的键盘快捷入口。基础控件、表单、日期选择、弹窗与状态反馈使用 Mantine；岗位编辑和投递维护继续在对应卡片内完成，所有审批和确认规则保持不变。
+
 模型设置允许用户为当前账户填写 Chat Completions 与 Embeddings API Key，并可选覆盖模型名称；密钥仅在保存时提交，服务端加密后持久化，读取接口只返回是否已配置及生效模型，不回显密钥。模型服务地址和默认模型由部署配置提供；部署者可选提供共享 API Key 作为账户未配置时的默认值。Tavily、SMTP 等共享集成仍由部署者配置。
 
 岗位页优先展示列表，新增岗位、CSV 导入和附加资料按需展开；保存或失败的反馈出现在相关操作附近，编辑岗位不跳回页面顶部。
@@ -204,7 +206,7 @@ OfferPilot 是面向应届生的求职流程管理与准备助手。它把分散
 
 | 层 | 技术 | 用途与取舍 |
 |---|---|---|
-| 前端 | Next.js App Router、React、TypeScript、Tailwind CSS | 完成响应式求职工作台和任务状态页面；TypeScript 与后端 schema 协作。 |
+| 前端 | Next.js App Router、React、TypeScript、Mantine、CSS Modules | 完成响应式求职工作台和任务状态页面；TypeScript 与后端 schema 协作。 |
 | API 后端 | Python、FastAPI、Pydantic | 业务 API、文件上传、流式 Agent 进度；Python 生态适合 RAG/LLM 集成。 |
 | 数据访问 | SQLAlchemy、Alembic | ORM、事务和数据库版本迁移。 |
 | 主数据库 | PostgreSQL | 保存用户、岗位、申请、提醒、审批和运行记录；全文搜索可先用 PostgreSQL。 |

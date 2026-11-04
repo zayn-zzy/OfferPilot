@@ -38,3 +38,5 @@ backend/storage/
 .vscode/
 *.swp
 .hallmark/
+frontend/test-results/
+frontend/playwright-report/

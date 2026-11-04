@@ -698,3 +698,40 @@ Python 标准库 `csv`、`io` 与 `re` 处理模板、编码、RFC 风格引号/
 - 后端全量回归：`UV_CACHE_DIR=/tmp/offerpilot-uv-cache uv run --offline pytest -o addopts='' -q -o faulthandler_timeout=60`，150 项通过；包含账户隔离、密文落库、不回显、部署 Key fallback、移除账户 Key、未登录拒绝、Agent 使用所有者 Key/模型，以及不暴露部署地址。
 - 空 SQLite 数据库成功从头执行至 `20261104_0010`；`uv lock --check --offline`、`python -m compileall`、前端 `bun run typecheck` 与 `git diff --check` 通过。
 - Provider 测试使用假实现/SQLite，不调用真实模型服务；没有做真实浏览器或 Compose/PostgreSQL 联调。
+
+## Mantine 全站产品化改版（2026-11-05）
+
+### 完成内容与技术
+
+- 在原实验分支基础上创建 `experiment/mantine-product-ui`。13 个页面统一采用 Mantine 控件、Tabler 图标和 CSS Modules：首页、登录、注册、求职总览、岗位、个人档案、资料问答、公司档案、Agent 工作区、提醒、Skills、外部动作和设置。
+- 新增客户端 Providers，接入 Mantine Core/Hooks/Form/Dates/Notifications/Modals/Spotlight/Dropzone、dayjs 中文日期。颜色、字体、间距、边框、焦点和状态来自统一主题与语义变量；石墨中性色配青绿强调色，支持浅色、深色、跟随系统及选择持久化。
+- 业务路由移动到 App Router 的 `(workspace)` 路由组，共享 AppShell。桌面侧栏分组并支持折叠为图标栏；移动端使用抽屉；顶部提供当前位置、真实站内通知、主题及账户菜单。`Ctrl/Cmd + K` 仅跳转已有页面与快捷入口。
+- 岗位管理保留单一列表和卡片内编辑，新增、CSV 与 AI 导入改用抽屉，匹配/研究/来源按 Tabs 展示。保留保存后清空筛选、立即显示并定位卡片、旧请求不能覆盖新列表以及各类重复来源合并入口。
+- 档案与简历分区，增加文件 Dropzone 和解析预览抽屉；资料问答采用资料管理/问答双区；公司档案采用选择/详情分栏；Agent 与 Skills 将配置、任务列表和选中结果组织成工作区，Timeline 只展示真实任务进度。
+- 提醒按日期组织并使用日期时间控件；邮件编辑与完整预览并列，批准与最终发送继续独立；设置按模型集成、账户偏好和数据控制分组。首次 API 读取失败时明确提示重试，不把失败误显示为“没有记录”或“SMTP 未配置”。
+- 首页展示实际改版后的产品截图，明确标注演示资料。全站保留持久错误、字段提示与待核对结果；成功反馈使用通知。移动端、键盘焦点、弹窗焦点恢复与减少动态效果设置均纳入检查。
+
+### 与上一版的区别及兼容性调整
+
+上一版主要使用手写控件与分散的页面导航；本次统一了基础组件、共享侧栏和反馈方式，并按求职任务组织页面。没有新增后端 API，也没有更换认证、幂等键、SSE、轮询、账户时区转换与审批逻辑。`/jobs?task=extract`、`/agent#task-planner` 和邮件草稿载入入口保持可用；删除、时区重算、准备包保存和邮件最终发送继续需要明确确认。
+
+计划中的 Mantine **9.7.4** 在实际生产构建中无法使用：当前 Next.js 15 内置 React 运行时不导出其依赖的 `Activity` 和 `useEffectEvent`。因此将所有 Mantine 包统一固定为经构建与浏览器验证的 **8.3.18**，更新 Bun 锁文件，保持现有 Next.js/React 版本。没有用运行时补丁绕过缺失的 React API。
+
+### 验证结果
+
+- `bun run typecheck` 通过；生产 `next build` 在隔离副本完成编译、类型检查与全部 16 个静态页面生成。隔离构建避免与用户正在运行的开发服务共用 `.next`。
+- Playwright **21 项通过**：13 路由的桌面/手机及浅深主题矩阵、侧栏/主题记忆、快捷跳转、移动菜单与焦点、岗位新增/编辑/筛选、CSV、AI 保存后立即可见及刷新、失败重试/取消、简历上传确认、RAG 引用、提醒确认、时区重算、Skill 批准/执行、邮件最终确认、401/404/500/503、初次读取失败后重试，以及平板/宽屏。包含横向溢出、运行时错误、深浅主题主按钮文字对比度与减少动态效果检查。
+- 独立的真实 API Playwright **1 项通过（含 5 段业务流程）**：通过实际 Next.js 代理注册/登录，保存并重新读取档案、确认简历、保存/编辑/刷新岗位、合并重复岗位并保留投递记录和阶段历史。使用临时 SQLite 与独立账户，结束后确认临时账户数为 0。
+- 原有 `scripts/check_agent_job_visibility.py` 通过真实页面/API 验证保存、列表首张卡片可见、来源证据、刷新保留、迟到旧响应不能覆盖新列表、旧已保存任务仍可定位。仅增加可选 `OFFERPILOT_CHROME_PATH`，未放宽原有断言。
+- 后端定向回归 **63 项通过**，覆盖账户、档案/简历、岗位、提醒、Skills 和外部动作。本次未把它称为后端全量回归。
+- Hallmark App Screen 静态与渲染审查：**0 FAIL、0 WARN、无未处理 REFLEX**；完成 10 个业务 URL 的 50 张多尺寸截图。2 条“缺少标题元素”静态提示已核实：Mantine `Title` 实际渲染为 `h2`，按误报记录为 DISMISSED。
+- 同资料、同尺寸保存 13 页前后截图，另外保存手机和深色状态截图；对比入口为 `frontend/.hallmark/compare.html`。截图与浏览器报告属于本地审查产物，不提交 Git；`bun run test:compare` 可重新生成画廊。`git diff --check` 通过，另经只读审查确认关键业务约束保留。
+
+上述浏览器业务异常与任务状态使用受控 API 数据；真实联调使用隔离 SQLite，未启动 Compose/PostgreSQL/Redis，未调用付费模型、真实搜索服务或发送邮件。UI 通过不代表这些外部服务已完成部署验收。
+
+### 使用与维护入口
+
+- 更新依赖后运行：在 `frontend/` 执行 `bun install --frozen-lockfile`、`bun run dev`。现有页面 URL 不变。
+- 主题与共享布局：`frontend/lib/theme.ts`、`frontend/app/providers.tsx`、`frontend/components/workspace-shell.tsx`；规范见根目录 `DESIGN.md`。
+- 测试：`OFFERPILOT_TEST_BASE_URL=http://localhost:3000 bun run test:e2e`；真实测试环境使用 `bun run test:live`。可用 `OFFERPILOT_CHROME_PATH` 指定 Chromium/Chrome。
+- 实现源码与验证/文档分别提交到本地实验分支；具体提交号以 `git log` 为准。

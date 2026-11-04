@@ -156,6 +156,7 @@ try:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(
             headless=True,
+            executable_path=os.environ.get("OFFERPILOT_CHROME_PATH"),
             args=["--no-sandbox", "--disable-dev-shm-usage"],
         )
         context = browser.new_context(base_url=BASE_URL, viewport={"width": 1440, "height": 1000})

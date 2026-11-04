@@ -4,7 +4,7 @@
 
 ## 技术栈
 
-- 前端：Next.js App Router、React、TypeScript
+- 前端：Next.js App Router、React、TypeScript、Mantine 8.3.18、CSS Modules、Tabler 图标
 - 后端：FastAPI、Pydantic、SQLAlchemy、Alembic
 - 数据：Compose 使用带 pgvector 扩展的 PostgreSQL 17 和 Redis 7；简历文件使用私有本地存储卷
 - 本地开发：Docker Compose；前端依赖使用 Bun
@@ -201,6 +201,37 @@ uv run scripts/check_agent_job_visibility.py
 ```
 
 脚本创建独立临时账号和 12 条合成岗位，预置一条成功的提取任务，再通过真实页面/API 验证确认保存、首张卡片可见、刷新保留、旧响应不覆盖新列表及已保存任务定位。提取阶段不调用模型；结束后只清理该临时账号的数据。
+
+## Mantine 产品工作台
+
+13 个页面已使用 Mantine 统一控件与布局。业务路由位于 `frontend/app/(workspace)/`，路由组不会改变 `/jobs`、`/agent` 等 URL。共享侧栏按工作台、岗位与招聘、资料与准备、集成与账户分组；支持桌面折叠、移动端抽屉、`Ctrl/Cmd + K` 快速跳转、账户菜单、真实站内通知及浅色/深色/跟随系统主题。
+
+岗位编辑和投递记录仍在对应卡片内；新增、CSV 和 AI 导入使用抽屉。提醒、Skills 和邮件仍由服务端结果决定是否成功，批准与执行保持独立。颜色、字体与控件约定见 [DESIGN.md](DESIGN.md)，实现和验证记录见 [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md)。
+
+Mantine 固定为 **8.3.18**：实际生产构建发现 9.7.4 所需的 React `Activity`、`useEffectEvent` 未由当前 Next.js 15 的内置 React 运行时导出。只核对项目安装的 React 版本不足以确认兼容性，因此本次采用经过构建和浏览器验证的 8 系列，保留现有 Next.js/React 版本。
+
+更新前端依赖并启动：
+
+```bash
+cd frontend
+bun install --frozen-lockfile
+bun run dev
+```
+
+前端浏览器回归使用内存 API 数据，不调用模型或 SMTP；覆盖全部页面的浅深主题、桌面/手机、导航和关键确认操作。先启动 Web，再运行：
+
+```bash
+cd frontend
+OFFERPILOT_TEST_BASE_URL=http://localhost:3000 bun run test:e2e
+```
+
+测试会优先使用 `OFFERPILOT_CHROME_PATH`；当前服务器已安装的用户目录 Chrome 可自动识别。其他环境可运行 `bunx playwright install chromium` 安装测试浏览器。真实 API 回归使用临时账户，通过实际 Next.js 代理验证注册登录、档案、简历确认、岗位保存编辑及重复合并，结束后删除该账户；应指向测试环境：
+
+```bash
+OFFERPILOT_TEST_BASE_URL=http://localhost:3000 bun run test:live
+```
+
+在旧版本和新版本分别运行 `test:capture` 可生成同数据、同尺寸的前后截图；旧版本运行时设置 `OFFERPILOT_CAPTURE_BASELINE=1`。`bun run test:compare` 会生成 `frontend/.hallmark/compare.html`，包含 13 个页面对比及手机/深色截图链接。截图与浏览器报告是本地审查产物，未提交 Git。
 
 ## 当前 API
 
