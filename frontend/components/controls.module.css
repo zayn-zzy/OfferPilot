@@ -1,0 +1,12 @@
+/* Hallmark · app screen · brand · accessible Mantine form controls */
+/* Hallmark · critique: field boundaries and secondary text remain legible in both themes */
+.input.input {
+  border-color: var(--app-field-edge);
+}
+.input.input:focus,
+.input.input:focus-within {
+  border-color: var(--mantine-primary-color-filled);
+}
+.input.input:disabled {
+  color: var(--mantine-color-dimmed);
+}

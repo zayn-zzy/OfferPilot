@@ -1,0 +1,8 @@
+/* Hallmark · app screen · modern-minimal · brand · full redesign */
+/* Critique: provider readiness and destructive data controls are clearly separated. */
+.providerGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--mantine-spacing-lg); }
+.modelStatus { background: var(--mantine-color-default-hover); padding: var(--mantine-spacing-md); border-radius: var(--mantine-radius-md); }
+.modelName { overflow-wrap: anywhere; }
+.accountPanel, .dataPanel { max-width: 840px; }
+.dangerPanel { border-color: var(--mantine-color-red-outline); }
+@media (max-width: 62em) { .providerGrid { grid-template-columns: minmax(0, 1fr); } }

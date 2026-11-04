@@ -1,0 +1,19 @@
+/* Hallmark · app screen · modern-minimal · brand · full redesign */
+/* Critique: the company directory anchors navigation, evidence remains close to claims. */
+.workspace { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: var(--mantine-spacing-lg); align-items: start; }
+.directory { position: sticky; top: 88px; }
+.companyLink { display: flex; gap: var(--mantine-spacing-sm); width: 100%; padding: var(--mantine-spacing-sm); border-radius: var(--mantine-radius-md); }
+.companyLink:hover { background: var(--mantine-color-default-hover); }
+.companyLink[data-active] { background: var(--mantine-primary-color-light); color: var(--mantine-primary-color-light-color); }
+.companyName { min-width: 0; flex: 1; }
+.detail, .jobInfo { min-width: 0; }
+.detail h2, .detail h4 { overflow-wrap: anywhere; }
+.sourceText { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
+.quote { font-size: var(--mantine-font-size-sm); overflow-wrap: anywhere; }
+@media (max-width: 62em) { .workspace { grid-template-columns: 220px minmax(0, 1fr); } }
+@media (max-width: 48em) { .workspace { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-reduced-motion: reduce) { .companyLink { transition: none; } }
+
+.companyLink:focus-visible { outline: 2px solid var(--mantine-primary-color-filled); outline-offset: 2px; }
+
+.detail h2, .detail h4 { text-wrap: balance; }

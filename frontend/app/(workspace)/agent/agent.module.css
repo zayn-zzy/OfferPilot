@@ -1,0 +1,122 @@
+/* Hallmark · app screen · theme: OfferPilot graphite and teal · redesign: full · Mantine */
+/* Critique: shared workspaces prioritize the active task, readable evidence and explicit actions. */
+/* Hallmark · dismissed 54 · Mantine Title order={2} renders real h2 headings for task and workflow sections, verified in the browser. */
+.grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.5fr);
+  gap: var(--mantine-spacing-xl);
+  align-items: start;
+}
+.equalGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--mantine-spacing-xl);
+  align-items: start;
+}
+.taskGrid {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.7fr) minmax(0, 1.5fr);
+  gap: var(--mantine-spacing-lg);
+  align-items: start;
+}
+.panel {
+  min-width: 0;
+}
+.list {
+  display: grid;
+  gap: var(--mantine-spacing-xs);
+}
+.listButton {
+  width: 100%;
+  text-align: start;
+  padding: var(--mantine-spacing-md);
+  border-radius: var(--mantine-radius-md);
+  border: 1px solid transparent;
+  color: var(--mantine-color-text);
+  background: transparent;
+}
+.listButton:hover {
+  background: var(--mantine-color-default-hover);
+}
+.listButton:active:not(:disabled) {
+  background: var(--mantine-primary-color-light-hover);
+}
+.listButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.listButton:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 2px;
+}
+.selected {
+  background: var(--mantine-primary-color-light);
+  border-color: var(--mantine-primary-color-light-hover);
+}
+.listButton p {
+  margin: 0;
+}
+.pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  font-size: var(--mantine-font-size-sm);
+  line-height: 1.8;
+}
+.quote {
+  margin: 0;
+  padding: var(--mantine-spacing-sm) var(--mantine-spacing-md);
+  border: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-default-hover);
+  border-radius: var(--mantine-radius-sm);
+  overflow-wrap: anywhere;
+}
+.quote p {
+  white-space: pre-wrap;
+  margin: 0;
+}
+.sticky {
+  position: sticky;
+  top: 88px;
+}
+.dateGroup {
+  display: grid;
+  gap: var(--mantine-spacing-sm);
+}
+.timeGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--mantine-spacing-md);
+}
+.break {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+@media (max-width: 70em) {
+  .grid {
+    grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.2fr);
+  }
+  .taskGrid {
+    grid-template-columns: 1fr;
+  }
+  .sticky {
+    position: static;
+  }
+}
+@media (max-width: 48em) {
+  .grid,
+  .equalGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 30em) {
+  .timeGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .listButton {
+    transition: none;
+  }
+}

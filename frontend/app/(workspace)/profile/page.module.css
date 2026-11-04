@@ -1,0 +1,14 @@
+/* Hallmark · app screen · modern-minimal · brand · full redesign */
+/* Critique: restrained workspace, source confirmation remains explicit. */
+.formGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--mantine-spacing-lg); }
+.fullWidth { grid-column: 1 / -1; }
+.resumeGrid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: var(--mantine-spacing-lg); align-items: start; }
+.version { display: flex; gap: var(--mantine-spacing-sm); align-items: center; width: 100%; border: 1px solid var(--mantine-color-default-border); border-radius: var(--mantine-radius-md); padding: var(--mantine-spacing-md); }
+.version:hover { background: var(--mantine-color-default-hover); }
+.versionText { flex: 1; min-width: 0; }
+.preview { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: var(--mantine-font-size-sm); line-height: 1.8; margin: 0; }
+@media (max-width: 62em) { .resumeGrid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 40em) { .formGrid { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-reduced-motion: reduce) { .version { transition: none; } }
+
+.version:focus-visible { outline: 2px solid var(--mantine-primary-color-filled); outline-offset: 2px; }

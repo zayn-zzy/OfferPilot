@@ -1,0 +1,7 @@
+/* Hallmark · app screen · modern-minimal · brand · full redesign */
+/* Critique: sources and answers stay side by side without simulated chat. */
+.workspace { display: grid; grid-template-columns: minmax(260px, .8fr) minmax(0, 1.65fr); gap: var(--mantine-spacing-lg); align-items: start; }
+.answerPane { min-width: 0; min-height: 520px; }
+.sourceText, .answerText { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
+.quote { margin: 0; font-size: var(--mantine-font-size-sm); overflow-wrap: anywhere; }
+@media (max-width: 62em) { .workspace { grid-template-columns: minmax(0, 1fr); } .answerPane { min-height: 0; } }

@@ -1,0 +1,71 @@
+/* Hallmark · modern-minimal · brand · public product and account screens */
+/* Hallmark · critique: product evidence carries the public page, forms stay focused */
+.auth {
+  min-height: 100dvh;
+  background: var(--app-canvas);
+}
+.authGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 440px);
+  gap: 80px;
+  align-items: center;
+  min-height: calc(100dvh - 100px);
+  padding: 40px 0 88px;
+}
+.hero {
+  padding: 80px 0 44px;
+  max-width: 800px;
+  margin: 0 auto;
+  text-align: center;
+}
+.heroTitle {
+  font-size: clamp(34px, 4.4vw, 58px);
+  line-height: 1.14;
+  letter-spacing: -1.8px;
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+.preview {
+  margin: 24px auto 72px;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-xl);
+  overflow: clip;
+  box-shadow: var(--mantine-shadow-lg);
+  background: var(--app-surface);
+}
+.previewHeading {
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  padding: 16px 20px;
+}
+.feature {
+  padding: 24px 0;
+  border-top: 1px solid var(--mantine-color-default-border);
+}
+.footer {
+  margin-top: 64px;
+  padding: 28px 0;
+  border-top: 1px solid var(--mantine-color-default-border);
+}
+@media (max-width: 62em) {
+  .authGrid {
+    display: block;
+    max-width: 480px;
+    margin: auto;
+    min-height: auto;
+    padding: 60px 0;
+  }
+}
+@media (max-width: 40em) {
+  .hero {
+    padding: 44px 0 28px;
+  }
+  .heroTitle {
+    letter-spacing: -0.8px;
+  }
+  .preview {
+    margin-bottom: 40px;
+  }
+  .authGrid {
+    padding: 32px 0;
+  }
+}

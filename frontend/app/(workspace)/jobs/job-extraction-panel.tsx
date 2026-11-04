@@ -1,0 +1,377 @@
+"use client";
+
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Accordion, Alert, Badge, Button, Group, SimpleGrid, Stack, Text, Textarea, TextInput, Timeline, Title } from "@mantine/core";
+import { DateInput } from "@mantine/dates";
+import { IconCheck, IconPlayerStop, IconRefresh, IconSparkles } from "@tabler/icons-react";
+import { Feedback } from "@/components/ui";
+import classes from "./jobs.module.css";
+import {
+  apiRequest,
+  duplicateJobIdFromError,
+  type AgentTask,
+  type AgentTaskEvent,
+  type JobPosting,
+} from "@/lib/api";
+
+type JobFieldDraft = {
+  company_name: string;
+  title: string;
+  city: string;
+  job_type: string;
+  batch: string;
+  deadline: string;
+  education_requirement: string;
+  required_skills: string;
+};
+
+const FIELD_LABELS: Record<keyof JobFieldDraft, string> = {
+  company_name: "公司",
+  title: "职位",
+  city: "工作地点",
+  job_type: "岗位类型",
+  batch: "招聘批次",
+  deadline: "截止日期",
+  education_requirement: "学历要求",
+  required_skills: "技能要求",
+};
+
+const TASK_STATUS_LABEL: Record<AgentTask["status"], string> = {
+  queued: "排队中",
+  running: "运行中",
+  cancelling: "取消中",
+  cancelled: "已取消",
+  succeeded: "待核对",
+  failed: "失败",
+  confirmed: "已保存",
+};
+
+const TASK_HEADING: Record<AgentTask["status"], string> = {
+  queued: "任务排队中",
+  running: "正在提取",
+  cancelling: "正在取消",
+  cancelled: "任务已取消",
+  succeeded: "提取完成，请核对",
+  failed: "提取失败",
+  confirmed: "岗位已保存",
+};
+
+function emptyDraft(): JobFieldDraft {
+  return {
+    company_name: "",
+    title: "",
+    city: "",
+    job_type: "",
+    batch: "",
+    deadline: "",
+    education_requirement: "",
+    required_skills: "",
+  };
+}
+
+function draftFromTask(task: AgentTask): JobFieldDraft {
+  const fields = task.result?.fields;
+  if (!fields) return emptyDraft();
+  const value = (key: keyof JobFieldDraft): string => {
+    const raw = fields[key]?.value;
+    return Array.isArray(raw) ? raw.join("、") : raw ?? "";
+  };
+  return {
+    company_name: value("company_name"),
+    title: value("title"),
+    city: value("city"),
+    job_type: value("job_type"),
+    batch: value("batch"),
+    deadline: value("deadline"),
+    education_requirement: value("education_requirement"),
+    required_skills: value("required_skills"),
+  };
+}
+
+type JobExtractionPanelProps = {
+  onJobCreated: (job: JobPosting) => void;
+  onCancel: () => void;
+};
+
+export default function JobExtractionPanel({ onJobCreated, onCancel }: JobExtractionPanelProps) {
+  const idempotencyKey = useRef<string | null>(null);
+  const [text, setText] = useState("");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [task, setTask] = useState<AgentTask | null>(null);
+  const [duplicateTarget, setDuplicateTarget] = useState<JobPosting | null>(null);
+  const [events, setEvents] = useState<AgentTaskEvent[]>([]);
+  const [draft, setDraft] = useState<JobFieldDraft>(emptyDraft);
+  const [submitting, setSubmitting] = useState(false);
+  const [canceling, setCanceling] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const active = task?.status === "queued" || task?.status === "running" || task?.status === "cancelling";
+  const needsReview = useMemo(() => new Set(task?.result?.needs_review_fields ?? []), [task]);
+
+  useEffect(() => {
+    let mounted = true;
+    void apiRequest<AgentTask[]>("/api/v1/agent/tasks?limit=1")
+      .then(async (recent) => {
+        const latest = recent[0];
+        if (!mounted || !latest) return;
+        setTask(latest);
+        setEvents(latest.events);
+        if (latest.status === "succeeded") setDraft(draftFromTask(latest));
+        if (latest.status !== "confirmed") {
+          const source = await apiRequest<{ source_text: string }>(`/api/v1/agent/tasks/${latest.id}/source`);
+          if (mounted) setText(source.source_text);
+        }
+      })
+      .catch(() => {
+        // Task history is optional; a first-time user can still submit a new extraction.
+      })
+      .finally(() => {
+        if (mounted) setHistoryLoading(false);
+      });
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!task || !active) return;
+    let mounted = true;
+    const eventSource = new EventSource(`/api/v1/agent/tasks/${task.id}/events`, { withCredentials: true });
+
+    function receive(event: MessageEvent<string>) {
+      try {
+        const item = JSON.parse(event.data) as AgentTaskEvent;
+        if (
+          mounted
+          && Number.isInteger(item.id)
+          && typeof item.message === "string"
+          && Number.isFinite(Date.parse(item.created_at))
+        ) {
+          setEvents((current) => current.some((existing) => existing.id === item.id)
+            ? current
+            : [...current, item].sort((a, b) => a.id - b.id));
+        }
+      } catch {
+        // A malformed progress frame is ignored; the persisted task endpoint remains authoritative.
+      }
+    }
+
+    eventSource.addEventListener("progress", receive as EventListener);
+    eventSource.addEventListener("completed", receive as EventListener);
+    eventSource.addEventListener("failed", receive as EventListener);
+    eventSource.addEventListener("cancelled", receive as EventListener);
+
+    const poll = window.setInterval(() => {
+      void apiRequest<AgentTask>(`/api/v1/agent/tasks/${task.id}`)
+        .then((current) => {
+          if (!mounted) return;
+          setTask(current);
+          setEvents(current.events);
+          if (current.status === "succeeded") setDraft(draftFromTask(current));
+        })
+        .catch((cause: unknown) => {
+          if (mounted) setError(cause instanceof Error ? cause.message : "无法读取任务状态。");
+        });
+    }, 1500);
+
+    return () => {
+      mounted = false;
+      eventSource.close();
+      window.clearInterval(poll);
+    };
+  }, [task?.id, active]);
+
+  async function start(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    idempotencyKey.current ??= window.crypto.randomUUID();
+    try {
+      const created = await apiRequest<AgentTask>("/api/v1/agent/job-extractions", {
+        method: "POST",
+        body: JSON.stringify({
+          text,
+          source_url: sourceUrl.trim() || null,
+          idempotency_key: idempotencyKey.current,
+        }),
+      });
+      idempotencyKey.current = null;
+      setTask(created);
+      setEvents(created.events);
+      if (created.status === "succeeded") setDraft(draftFromTask(created));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "无法创建岗位解析任务。");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function retry() {
+    if (!task) return;
+    setError("");
+    try {
+      const retried = await apiRequest<AgentTask>(`/api/v1/agent/tasks/${task.id}/retry`, { method: "POST" });
+      setTask(retried);
+      setEvents(retried.events);
+      if (retried.status === "succeeded") setDraft(draftFromTask(retried));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "任务重试失败。");
+    }
+  }
+
+  async function cancelTask() {
+    if (!task) return;
+    setCanceling(true);
+    setError("");
+    try {
+      const updated = await apiRequest<AgentTask>(`/api/v1/agent/tasks/${task.id}/cancel`, { method: "POST" });
+      setTask(updated);
+      setEvents(updated.events);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "取消岗位解析任务失败。");
+      try {
+        const current = await apiRequest<AgentTask>(`/api/v1/agent/tasks/${task.id}`);
+        setTask(current);
+        setEvents(current.events);
+      } catch {
+        // Keep the current view; the active-task poll will retry the authoritative state.
+      }
+    } finally {
+      setCanceling(false);
+    }
+  }
+
+  async function deleteTask() {
+    if (!task) return;
+    setError("");
+    try {
+      await apiRequest(`/api/v1/agent/tasks/${task.id}`, { method: "DELETE" });
+      startAnother();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "删除任务失败。");
+    }
+  }
+
+  async function openSavedJob() {
+    if (!task?.job_id) {
+      setError("该任务没有可查看的关联岗位。");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const saved = await apiRequest<JobPosting>(`/api/v1/jobs/${task.job_id}`);
+      onJobCreated(saved);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "无法读取已保存的岗位。");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveConfirmedJob(mergeIntoJobId?: string) {
+    if (!task) return;
+    setSaving(true);
+    setError("");
+    try {
+      const payload = {
+        company_name: draft.company_name.trim() || null,
+        title: draft.title.trim() || null,
+        city: draft.city.trim() || null,
+        job_type: draft.job_type.trim() || null,
+        batch: draft.batch.trim() || null,
+        deadline: draft.deadline || null,
+        education_requirement: draft.education_requirement.trim() || null,
+        required_skills: draft.required_skills.split(/[、,，]/).map((item) => item.trim()).filter(Boolean),
+        ...(mergeIntoJobId ? { merge_into_job_id: mergeIntoJobId } : {}),
+      };
+      const job = await apiRequest<JobPosting>(`/api/v1/agent/tasks/${task.id}/confirm`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      onJobCreated(job);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "保存岗位失败。");
+      const duplicateJobId = duplicateJobIdFromError(cause);
+      if (duplicateJobId) {
+        try {
+          setDuplicateTarget(await apiRequest<JobPosting>(`/api/v1/jobs/${duplicateJobId}`));
+        } catch {
+          // Keep the conflict message if the existing job cannot be loaded.
+        }
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function confirm(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setDuplicateTarget(null);
+    await saveConfirmedJob();
+  }
+
+  function updateDraft(key: keyof JobFieldDraft, value: string) {
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function startAnother() {
+    idempotencyKey.current = null;
+    setTask(null);
+    setDuplicateTarget(null);
+    setEvents([]);
+    setDraft(emptyDraft());
+    setText("");
+    setSourceUrl("");
+    setError("");
+  }
+
+  return (
+    <Stack component="section" className="job-extraction-panel" aria-label="AI 岗位信息提取" gap="md">
+      {!task && <>
+        <Alert variant="light" color="gray">原文会发送到你配置的模型服务商处理，请先确认隐私要求。模型只提取原文明确支持的字段，不会访问招聘网站或自动投递。</Alert>
+        <form onSubmit={start}><Stack>
+          <TextInput label="来源链接（选填）" type="url" maxLength={2048} value={sourceUrl} onChange={(event) => { idempotencyKey.current = null; setSourceUrl(event.currentTarget.value); }} placeholder="https://…" />
+          <Textarea label="招聘原文" required minLength={20} maxLength={30000} minRows={9} autosize maxRows={16} value={text} onChange={(event) => { idempotencyKey.current = null; setText(event.currentTarget.value); }} placeholder="粘贴岗位职责、任职要求和招聘信息，至少 20 个字符" />
+          <Group><Button leftSection={<IconSparkles size={16} />} disabled={historyLoading} loading={submitting} type="submit">{historyLoading ? "读取任务中…" : "提取岗位信息"}</Button><Button variant="default" onClick={onCancel} type="button">取消</Button></Group>
+        </Stack></form>
+      </>}
+      {task && <Stack gap="md">
+        <Group justify="space-between"><Title order={3} size="h4">{TASK_HEADING[task.status]}</Title><Badge color={task.status === "failed" ? "red" : task.status === "confirmed" ? "teal" : "gray"} variant="light">{TASK_STATUS_LABEL[task.status]}</Badge></Group>
+        <Timeline aria-label="任务进度" bulletSize={18} lineWidth={2} active={Math.max(0, (events.length ? events : task.events).length - 1)}>
+          {(events.length ? events : task.events).map((item) => <Timeline.Item key={item.id} title={<Text size="sm">{item.message}</Text>}><Text size="xs" c="dimmed">{new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(item.created_at))}</Text></Timeline.Item>)}
+        </Timeline>
+        {active && task.status !== "cancelling" && <Group justify="space-between"><Text size="sm" c="dimmed">任务状态会保存在账户中；重新打开此面板可继续查看。</Text><Button variant="default" leftSection={<IconPlayerStop size={16} />} loading={canceling} onClick={() => void cancelTask()}>取消解析</Button></Group>}
+        {task.status === "cancelling" && <Alert color="yellow">正在等待当前模型请求结束；返回内容不会保存。</Alert>}
+        {task.status === "cancelled" && <><Text size="sm" c="dimmed">任务已取消，模型结果未保存。你可以清理记录后重新提交。</Text><Button variant="subtle" color="red" onClick={() => void deleteTask()}>清理已取消任务并新建</Button></>}
+        {task.status === "failed" && <>
+          <Alert color="red" title="提取失败"><Stack gap="xs"><Text size="sm" role="alert">{task.error_message || "任务失败。"}</Text><Text size="sm">尝试次数：{task.attempt_count}/3。修正模型配置或等待服务恢复后可重试。</Text><Button leftSection={<IconRefresh size={16} />} disabled={task.attempt_count >= 3} onClick={() => void retry()}>重试</Button></Stack></Alert>
+          <Button variant="subtle" color="red" onClick={() => void deleteTask()}>清理失败任务并新建</Button>
+        </>}
+        {task.status === "succeeded" && task.result && <form onSubmit={confirm}><Stack>
+          <Alert color="yellow" variant="light">请检查每个字段。“需要确认”表示置信度较低、缺少引用或未提取到；原文引用已由服务端逐字校验。</Alert>
+          <SimpleGrid cols={{ base: 1, sm: 2 }}>{(Object.keys(FIELD_LABELS) as (keyof JobFieldDraft)[]).map((key) => {
+            const evidence = task.result?.fields[key];
+            const label = FIELD_LABELS[key];
+            const review = needsReview.has(key);
+            return <label className={`agent-field ${classes.reviewField} ${review ? classes.reviewNeeded : ""}`} key={key}>
+              <span className={classes.reviewHeading}><Text component="strong" fw={600} size="sm">{label}</Text><Badge variant="light" color={review ? "yellow" : "teal"}>{review ? "需要确认" : "有原文依据"}</Badge></span>
+              {key === "deadline" ? <DateInput aria-label={label} clearable value={draft[key] || null} onChange={(value) => updateDraft(key, value ?? "")} valueFormat="YYYY-MM-DD" placeholder="原文没有明确提供" /> : <TextInput aria-label={label} value={draft[key]} onChange={(event) => updateDraft(key, event.currentTarget.value)} placeholder="原文没有明确提供" />}
+              <Text component="span" size="xs" c="dimmed">置信度 {Math.round((evidence?.confidence ?? 0) * 100)}%</Text>
+              {evidence?.evidence && <Text component="span" size="xs" c="dimmed">原文：“{evidence.evidence}”</Text>}
+            </label>;
+          })}</SimpleGrid>
+          {duplicateTarget && <Alert color="yellow" title="发现已有岗位" role="status"><Stack gap="sm"><Text size="sm">{duplicateTarget.company_name || "未填写公司"} / {duplicateTarget.title || "未填写职位"} 使用了相同来源链接。</Text><Text size="sm">合并将保留已有非空字段、补齐空字段并合并技能/标签；投递记录保持不变。本次原文和字段引用也会关联到该岗位。</Text><Button loading={saving} onClick={() => void saveConfirmedJob(duplicateTarget.id)}>合并并保存来源依据</Button></Stack></Alert>}
+          <Group><Button leftSection={<IconCheck size={16} />} loading={saving} type="submit">确认并保存岗位</Button><Button variant="default" onClick={onCancel} type="button">取消</Button></Group>
+        </Stack></form>}
+        {task.status === "confirmed" && <>
+          <Alert color="teal" role="status">岗位已保存，原文与字段引用已关联到岗位。</Alert>
+          <Group><Button disabled={!task.job_id} loading={saving} onClick={() => void openSavedJob()}>查看已保存岗位</Button><Button variant="default" onClick={startAnother}>新建岗位解析任务</Button></Group>
+        </>}
+        {text && task.status !== "confirmed" && <Accordion variant="separated"><Accordion.Item value="source"><Accordion.Control>查看提交的招聘原文</Accordion.Control><Accordion.Panel><Text component="pre" size="sm" className={classes.preserveText}>{text}</Text></Accordion.Panel></Accordion.Item></Accordion>}
+        {task.status === "succeeded" && <Button variant="subtle" color="red" onClick={() => void deleteTask()}>清理此结果并新建任务</Button>}
+      </Stack>}
+      <Feedback error={error} />
+    </Stack>
+  );
+}

@@ -1,0 +1,90 @@
+/* Hallmark · app screen · modern-minimal · brand · Mantine product workspace */
+/* Hallmark · critique: shared navigation and real task state carry the product */
+.navbar {
+  background: var(--app-sidebar);
+  border-color: var(--mantine-color-default-border);
+}
+.brand {
+  height: 64px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+}
+.navigation {
+  padding: 12px;
+}
+.groupLabel {
+  padding: 16px 12px 8px;
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 500;
+}
+.navLink {
+  border-radius: var(--mantine-radius-md);
+  margin-bottom: 4px;
+  min-height: 42px;
+}
+.navLink[data-active] {
+  background: var(--mantine-color-teal-light);
+  color: var(--mantine-color-teal-light-color);
+  font-weight: 600;
+}
+.footer {
+  border-top: 1px solid var(--mantine-color-default-border);
+  padding: 12px;
+}
+.header {
+  background: var(--app-surface);
+  border-color: var(--mantine-color-default-border);
+}
+.headerInner {
+  height: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 0 28px;
+}
+.jump {
+  min-width: 190px;
+  color: var(--mantine-color-dimmed);
+}
+.content {
+  max-width: 1520px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 32px 32px 64px;
+  min-width: 0;
+}
+.notification {
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  padding: 12px 0;
+}
+.notification:last-child {
+  border-bottom: 0;
+}
+@media (max-width: 62em) {
+  .content {
+    padding: 24px 20px 48px;
+  }
+  .headerInner {
+    padding: 0 20px;
+  }
+}
+@media (max-width: 40em) {
+  .content {
+    padding: 20px 16px 40px;
+  }
+  .headerInner {
+    padding: 0 12px;
+    gap: 8px;
+  }
+  .jump {
+    min-width: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .navLink {
+    transition: none;
+  }
+}

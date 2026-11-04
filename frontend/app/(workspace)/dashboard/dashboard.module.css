@@ -1,0 +1,27 @@
+/* Hallmark · app screen · modern-minimal · brand · account dashboard */
+/* Hallmark · critique: real due tasks lead; navigation remains consistent */
+.stat {
+  color: var(--mantine-color-text);
+  text-decoration: none;
+  transition: transform 150ms ease;
+}
+.stat:hover {
+  transform: translateY(-2px);
+  border-color: var(--mantine-color-teal-outline);
+}
+.quick {
+  background: var(--app-tint);
+}
+.row {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+.row:last-child {
+  border-bottom: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .stat {
+    transition: none;
+    transform: none;
+  }
+}
